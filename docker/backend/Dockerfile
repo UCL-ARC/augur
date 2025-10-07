@@ -83,6 +83,8 @@ WORKDIR /augur
 COPY pyproject.toml .
 COPY uv.lock .
 COPY .python-version .
+COPY repos.csv /
+COPY repo_groups.csv /
 
 # Install augur's dependencies early to take advantage of build cache
 RUN --mount=type=cache,target=/root/.cache/uv \
