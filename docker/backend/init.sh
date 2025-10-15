@@ -23,4 +23,6 @@ echo "PATH: $PATH"
 echo "Python executable: $(which python)"
 python --version
 
+augur config set --section Logging --setting log_level --value DEBUG
+
 exec augur backend start --pidfile /tmp/main.pid
