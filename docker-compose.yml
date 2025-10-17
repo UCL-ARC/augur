@@ -7,12 +7,12 @@ services:
       - "POSTGRES_DB=augur"
       - "POSTGRES_USER=${AUGUR_DB_USER:-augur}"
       - "POSTGRES_PASSWORD=${AUGUR_DB_PASSWORD:-augur}"
-      - "PGDATA=/var/lib/postgresql/data/pgdata"
+      # - "PGDATA=/var/lib/postgresql/data/pgdata"
     ports:
       - "${AUGUR_DB_PORT:-5432}:5432"
     volumes:
       - augurpostgres:/var/lib/postgresql/data
-      - ./docker/database/postgresql.conf:/var/lib/postgresql/data/pgdata/postgresql.conf
+      - ./docker/database/postgresql.conf:/var/lib/postgresql/data/postgresql.conf
     networks:
       - augur
 
@@ -33,7 +33,7 @@ services:
       - redis
     networks:
       - augur
-    user: 3456:3456  # Run as an arbitrary non-root user
+    user: 3456:3456 # Run as an arbitrary non-root user
 
   rabbitmq:
     image: augur-rabbitmq
@@ -41,9 +41,9 @@ services:
       context: .
       dockerfile: ./docker/rabbitmq/Dockerfile
       args:
-      - RABBIT_MQ_DEFAULT_USER=${AUGUR_RABBITMQ_USERNAME:-augur}
-      - RABBIT_MQ_DEFAULT_PASSWORD=${AUGUR_RABBITMQ_PASSWORD:-password123}
-      - RABBIT_MQ_DEFAULT_VHOST=${AUGUR_RABBITMQ_VHOST:-augur_vhost}
+        - RABBIT_MQ_DEFAULT_USER=${AUGUR_RABBITMQ_USERNAME:-augur}
+        - RABBIT_MQ_DEFAULT_PASSWORD=${AUGUR_RABBITMQ_PASSWORD:-password123}
+        - RABBIT_MQ_DEFAULT_VHOST=${AUGUR_RABBITMQ_VHOST:-augur_vhost}
     networks:
       - augur
 
@@ -84,7 +84,7 @@ services:
       - rabbitmq
     networks:
       - augur
-    user: 2345:2345  # Run as an arbitrary non-root user
+    user: 2345:2345 # Run as an arbitrary non-root user
     post_start:
       # Make sure the user has access to the volumes
       - command: chmod 777 /facade /logs /config /cache
@@ -94,23 +94,22 @@ services:
   # This wont show you every error from the entire augur system, but it should show most of them.
   # uncomment the section below to use flower
   flower:
-   image: augur-new:latest
-   restart: unless-stopped
-   command:
-     [ "celery", "-A", "augur.tasks.init.celery_app.celery_app", "flower", "--max-tasks=1000000" ]
-   ports:
-     - 5555:5555
-   environment:
-     - "AUGUR_DB=postgresql+psycopg2://${AUGUR_DB_USER:-augur}:${AUGUR_DB_PASSWORD:-augur}@augur-db:5432/augur"
-     - REDIS_CONN_STRING=redis://redis:6379
-     - RABBITMQ_CONN_STRING=amqp://${AUGUR_RABBITMQ_USERNAME:-augur}:${AUGUR_RABBITMQ_PASSWORD:-password123}@rabbitmq:5672/${AUGUR_RABBITMQ_VHOST:-augur_vhost}
-   depends_on:
-     - augur
-     - augur-db
-     - redis
-     - rabbitmq
-   networks:
-     - augur
+    image: augur-new:latest
+    restart: unless-stopped
+    command: [ "celery", "-A", "augur.tasks.init.celery_app.celery_app", "flower", "--max-tasks=1000000" ]
+    ports:
+      - 5555:5555
+    environment:
+      - "AUGUR_DB=postgresql+psycopg2://${AUGUR_DB_USER:-augur}:${AUGUR_DB_PASSWORD:-augur}@augur-db:5432/augur"
+      - REDIS_CONN_STRING=redis://redis:6379
+      - RABBITMQ_CONN_STRING=amqp://${AUGUR_RABBITMQ_USERNAME:-augur}:${AUGUR_RABBITMQ_PASSWORD:-password123}@rabbitmq:5672/${AUGUR_RABBITMQ_VHOST:-augur_vhost}
+    depends_on:
+      - augur
+      - augur-db
+      - redis
+      - rabbitmq
+    networks:
+      - augur
 
 volumes:
   augurpostgres:
@@ -118,6 +117,7 @@ volumes:
   config:
   facade:
   logs:
+
 
 networks:
   augur:
