@@ -112,7 +112,7 @@ def process_pull_requests(pull_requests, task_name, repo_id, logger, augur_db):
 
     # insert contributors from these prs
     logger.info(f"{task_name}: Inserting {len(contributors)} contributors")
-    augur_db.insert_data(contributors, Contributor, ["cntrb_id"])
+    augur_db.insert_data(contributors, Contributor, ["cntrb_id"], on_conflict_update=False)
 
 
     # insert the prs into the pull_requests table. 
