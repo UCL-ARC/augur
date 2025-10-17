@@ -286,7 +286,9 @@ def batch_insert_contributors(logger, data: Union[List[dict], dict]) -> Optional
 
 
 
-def bulk_insert_dicts(logger, data: Union[List[dict], dict], table, natural_keys: List[str], return_columns: Optional[List[str]] = None, string_fields: Optional[List[str]] = None, on_conflict_update:bool = True) -> Optional[List[dict]]:
+def bulk_insert_dicts(logger, data: Union[List[dict], dict], table, natural_keys: List[str], return_columns: Optional[List[str]] = None, string_fields: Optional[List[str]] = None,
+    on_conflict_update: bool = False,
+) -> Optional[List[dict]]:
 
     if isinstance(data, list) is False:
         
@@ -390,8 +392,24 @@ def bulk_insert_dicts(logger, data: Union[List[dict], dict], table, natural_keys
                 first_half = data[:len(data)//2]
                 second_half = data[len(data)//2:]
 
-                bulk_insert_dicts(logger, first_half, table, natural_keys, return_columns, string_fields, on_conflict_update)
-                bulk_insert_dicts(logger, second_half,table, natural_keys, return_columns, string_fields, on_conflict_update)
+                bulk_insert_dicts(
+                    logger,
+                    first_half,
+                    table,
+                    natural_keys,
+                    return_columns,
+                    string_fields,
+                    # on_conflict_update,
+                )
+                bulk_insert_dicts(
+                    logger,
+                    second_half,
+                    table,
+                    natural_keys,
+                    return_columns,
+                    string_fields,
+                    # on_conflict_update,
+                )
 
         else:
             logger.error("Unable to insert data in 10 attempts")
@@ -428,8 +446,24 @@ def bulk_insert_dicts(logger, data: Union[List[dict], dict], table, natural_keys
             first_half = data[:len(data)//2]
             second_half = data[len(data)//2:]
 
-            bulk_insert_dicts(logger, first_half, table, natural_keys, return_columns, string_fields, on_conflict_update)
-            bulk_insert_dicts(logger, second_half, table, natural_keys, return_columns, string_fields, on_conflict_update)
+            bulk_insert_dicts(
+                logger,
+                first_half,
+                table,
+                natural_keys,
+                return_columns,
+                string_fields,
+                # on_conflict_update,
+            )
+            bulk_insert_dicts(
+                logger,
+                second_half,
+                table,
+                natural_keys,
+                return_columns,
+                string_fields,
+                # on_conflict_update,
+            )
 
     else:
         logger.error("Unable to insert and return data in 10 attempts")
