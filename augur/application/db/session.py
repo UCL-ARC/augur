@@ -1,5 +1,6 @@
 import time
 import random
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import OperationalError
@@ -137,15 +138,14 @@ class DatabaseSession(Session):
 
 
         if on_conflict_update:
-            filtered_keys = [
-                key
-                for key in data[0].keys()
-                if data[0][key] not in (None, "", "null", "Null")
-            ]
             # create a dict that the on_conflict_do_update method requires to be able to map updates whenever there is a conflict. See sqlalchemy docs for more explanation and examples: https://docs.sqlalchemy.org/en/14/dialects/postgresql.html#updating-using-the-excluded-insert-values
             setDict = {}
-            for key in filtered_keys:
-                setDict[key] = getattr(stmnt.excluded, key)
+            for key in data[0].keys():
+                if key not in natural_keys:
+                    # Use COALESCE to keep existing value if new value is NULL
+                    setDict[key] = func.coalesce(
+                        getattr(stmnt.excluded, key), getattr(table.c, key)
+                    )
 
             stmnt = stmnt.on_conflict_do_update(
                 # This might need to change
