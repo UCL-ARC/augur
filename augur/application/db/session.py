@@ -144,9 +144,15 @@ class DatabaseSession(Session):
             setDict = {}
             for key in data[0].keys():
                 if key not in natural_keys:
+                    excluded_val = getattr(stmnt.excluded, key)
+                    # Treat empty/'null' strings as NULL for string fields
+                    if string_fields and key in string_fields:
+                        excluded_val = func.nullif(
+                            func.nullif(func.nullif(excluded_val, ""), "null"), "Null"
+                        )
                     # Use COALESCE to keep existing value if new value is NULL
                     setDict[key] = func.coalesce(
-                        getattr(stmnt.excluded, key), getattr(stmnt.table.c, key)
+                        excluded_val, getattr(stmnt.table.c, key)
                     )
             # Only add on_conflict_do_update if there are columns to update
             if setDict:
