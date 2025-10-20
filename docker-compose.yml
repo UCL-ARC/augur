@@ -12,9 +12,11 @@ services:
       - "${AUGUR_DB_PORT:-5432}:5432"
     volumes:
       - augurpostgres:/var/lib/postgresql/data
+      - ./docker/database/postgresql.conf:/etc/postgresql/postgresql.conf
     networks:
       - augur
-
+    command: [ "postgres", "-c", "config_file=/etc/postgresql/postgresql.conf" ]
+    
   redis:
     image: "redis:alpine"
     networks:
