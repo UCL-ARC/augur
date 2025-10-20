@@ -282,7 +282,14 @@ def batch_insert_contributors(logger, data: Union[List[dict], dict]) -> Optional
     for i in range(0, len(data), batch_size):
         batch = data[i:i + batch_size]
 
-        bulk_insert_dicts(logger, batch, Contributor, ['cntrb_id'])
+        # Ensure string-like empties get normalized and NULL-safe upsert is applied for key text fields
+        bulk_insert_dicts(
+            logger,
+            batch,
+            Contributor,
+            ['cntrb_id'],
+            string_fields=['cntrb_email', 'cntrb_full_name', 'cntrb_company', 'cntrb_location', 'cntrb_canonical']
+        )
 
 
 
@@ -331,18 +338,29 @@ def bulk_insert_dicts(logger, data: Union[List[dict], dict], table, natural_keys
 
     if on_conflict_update:
 
-        # create a dict that the on_conflict_do_update method requires to be able to map updates whenever there is a conflict. See sqlalchemy docs for more explanation and examples: https://docs.sqlalchemy.org/en/14/dialects/postgresql.html#updating-using-the-excluded-insert-values
+        # Build the update mapping only for non-natural-key columns and protect against NULL overwrites.
+        # Use NULLIF on string fields to treat '', 'null', 'Null' as SQL NULL, then COALESCE to keep existing value when excluded is NULL.
         setDict = {}
         for key in data[0].keys():
-                setDict[key] = getattr(stmnt.excluded, key)
-            
-        stmnt = stmnt.on_conflict_do_update(
-            #This might need to change
-            index_elements=natural_keys,
-            
-            #Columns to be updated
-            set_ = setDict
-        )
+            if key not in natural_keys:
+                excluded_val = getattr(stmnt.excluded, key)
+                # Normalize empty string-like values to NULL for string fields if provided
+                if string_fields and key in string_fields:
+                    excluded_val = func.nullif(func.nullif(func.nullif(excluded_val, ''), 'null'), 'Null')
+
+                setDict[key] = func.coalesce(
+                    excluded_val,
+                    getattr(stmnt.table.c, key)
+                )
+
+        # If there are no non-natural-key columns to update, fall back to DO NOTHING on conflict
+        if setDict:
+            stmnt = stmnt.on_conflict_do_update(
+                index_elements=natural_keys,
+                set_=setDict
+            )
+        else:
+            stmnt = stmnt.on_conflict_do_nothing(index_elements=natural_keys)
 
     else:
         stmnt = stmnt.on_conflict_do_nothing(
