@@ -139,22 +139,25 @@ class DatabaseSession(Session):
 
         if on_conflict_update:
             # Get the actual table object from the model
-            table_obj = table if hasattr(table, "c") else table.__table__
+            # table_obj = table if hasattr(table, "c") else table.__table__
             # create a dict that the on_conflict_do_update method requires to be able to map updates whenever there is a conflict. See sqlalchemy docs for more explanation and examples: https://docs.sqlalchemy.org/en/14/dialects/postgresql.html#updating-using-the-excluded-insert-values
             setDict = {}
             for key in data[0].keys():
                 if key not in natural_keys:
                     # Use COALESCE to keep existing value if new value is NULL
                     setDict[key] = func.coalesce(
-                        getattr(stmnt.excluded, key), getattr(table_obj.c, key)
+                        getattr(stmnt.excluded, key), getattr(stmnt.table.c, key)
                     )
-
-            stmnt = stmnt.on_conflict_do_update(
-                # This might need to change
-                index_elements=natural_keys,
-                # Columns to be updated
-                set_=setDict,
-            )
+            # Only add on_conflict_do_update if there are columns to update
+            if setDict:
+                stmnt = stmnt.on_conflict_do_update(
+                    # This might need to change
+                    index_elements=natural_keys,
+                    # Columns to be updated
+                    set_=setDict,
+                )
+            else:
+                stmnt = stmnt.on_conflict_do_nothing(index_elements=natural_keys)
 
         else:
             stmnt = stmnt.on_conflict_do_nothing(
