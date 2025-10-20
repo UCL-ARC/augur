@@ -137,22 +137,21 @@ class DatabaseSession(Session):
 
 
         if on_conflict_update:
-
+            filtered_keys = [
+                key
+                for key in data[0].keys()
+                if data[0][key] not in (None, "", "null", "Null")
+            ]
             # create a dict that the on_conflict_do_update method requires to be able to map updates whenever there is a conflict. See sqlalchemy docs for more explanation and examples: https://docs.sqlalchemy.org/en/14/dialects/postgresql.html#updating-using-the-excluded-insert-values
             setDict = {}
-            for key in data[0].keys():
+            for key in filtered_keys:
                 setDict[key] = getattr(stmnt.excluded, key)
-                no_null_data_dict = {
-                    k: v
-                    for k, v in setDict.items()
-                    if v not in (None, "", "null", "Null")
-                }
 
             stmnt = stmnt.on_conflict_do_update(
                 # This might need to change
                 index_elements=natural_keys,
                 # Columns to be updated
-                set_=no_null_data_dict,
+                set_=setDict,
             )
 
         else:
