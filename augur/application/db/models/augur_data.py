@@ -20,8 +20,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB, TIMESTAMP, UUID
 from sqlalchemy.orm import relationship
-from sqlalchemy.sql import text
-from sqlalchemy.orm.exc import MultipleResultsFound, NoResultFound
+from sqlalchemy.exc import MultipleResultsFound, NoResultFound
 from time import sleep, mktime, gmtime, time, localtime
 import logging
 import re
@@ -279,11 +278,14 @@ class Contributor(Base):
         contributor_obj.cntrb_id = cntrb_id.to_UUID()
         contributor_obj.cntrb_login = contributor['login']
         contributor_obj.cntrb_created_at = contributor['created_at'] if 'created_at' in contributor else None
-        contributor_obj.cntrb_email = contributor['email'] if 'email' in contributor else None
+        # Only set email if meaningful; avoid propagating empty/"null" strings
+        _email = contributor['email'] if 'email' in contributor else None
+        _email = None if _email in (None, '', 'null', 'Null') else _email
+        contributor_obj.cntrb_email = _email
         contributor_obj.cntrb_company = contributor['company'] if 'company' in contributor else None
         contributor_obj.cntrb_location = contributor['location'] if 'location' in contributor else None
         # cntrb_type =  dont have a use for this as of now ... let it default to null
-        contributor_obj.cntrb_canonical = contributor['email'] if 'email' in contributor else None
+        contributor_obj.cntrb_canonical = _email
         contributor_obj.gh_user_id = contributor['id']
         contributor_obj.gh_login = str(contributor['login'])  ## cast as string by SPG on 11/28/2021 due to `nan` user
         contributor_obj.gh_url = contributor['url']
@@ -2517,20 +2519,16 @@ class IssueEvent(Base):
     repo = relationship("Repo")
 
     @classmethod
-    def from_github(cls, event, repo_id, platform_id, tool_source, tool_version, data_source):
-        
+    def from_github(cls, event, issue_id, repo_id, platform_id, tool_source, tool_version, data_source):
         issue_event_obj = cls()
-
         issue_event_obj.issue_event_src_id = int(event['id'])
         issue_event_obj.issue_id = issue_id
         issue_event_obj.node_id = event['node_id']
         issue_event_obj.node_url = event['url']
         issue_event_obj.cntrb_id = event["cntrb_id"] if "cntrb_id" in event else None
-        issue_event_obj.created_at = event['created_at'] if (
-            event['created_at']
-        ) else None,
+        issue_event_obj.created_at = event['created_at'] if event.get('created_at') else None
         issue_event_obj.action = event['event']
-        issue_event_obj.action_commit_hash = event['commit_id']
+        issue_event_obj.action_commit_hash = event.get('commit_id')
         issue_event_obj.tool_source = tool_source
         issue_event_obj.tool_version = tool_version
         issue_event_obj.data_source = data_source
@@ -2884,9 +2882,7 @@ class PullRequestAssignee(Base):
 
     @classmethod
     def from_github(cls, assignee, repo_id, tool_source, tool_version, data_source):
-        
-        pr_assignee_ojb = cls()
-
+        pr_assignee_obj = cls()
         # store the pr_url data on in the pr assignee data for now so we can relate it back to a pr later
         pr_assignee_obj.contrib_id = assignee["cntrb_id"]
         pr_assignee_obj.pr_assignee_src_id = int(assignee['id'])
@@ -3027,7 +3023,7 @@ class PullRequestEvent(Base):
     repo = relationship("Repo")
 
     @classmethod
-    def from_github(cls, event, pr_id, repo_id, tool_source, tool_version, data_source):
+    def from_github(cls, event, pr_id, platform_id, repo_id, tool_source, tool_version, data_source):
         
         pr_event_obj = cls()
 
