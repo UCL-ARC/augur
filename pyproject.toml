@@ -30,6 +30,7 @@ dependencies = [
     "cloudpickle>=0.2.2",
     "coloredlogs==15.0",
     "dask>=2021.6.2",
+    "debugpy>=1.8.17",
     "distributed>=2021.03.0",
     "dnspython==2.6.1",
     "emoji==1.2.0",

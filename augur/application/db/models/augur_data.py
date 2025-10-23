@@ -31,6 +31,9 @@ import urllib.parse
 from augur.application.db.models.base import Base
 from augur.application.db.util import execute_session_query
 from augur.application.db import get_session
+# import debugpy
+
+# debugpy.listen(("0.0.0.0", 5678))
 
 DEFAULT_REPO_GROUP_ID = 1
 
@@ -52,8 +55,7 @@ t_analysis_log = Table(
     ),
     schema="augur_data",
 )
-Index('repos_id', t_analysis_log.c.repos_id)
-
+Index("repos_id", t_analysis_log.c.repos_id)
 
 
 class ChaossMetricStatus(Base):
@@ -146,29 +148,34 @@ class Contributor(Base):
     __tablename__ = "contributors"
     __table_args__ = (
         # add uniques explitcitly, they were inline before
-        UniqueConstraint('gh_login', name='GH-UNIQUE-C', initially="DEFERRED", deferrable=True),
-        UniqueConstraint('gl_id', name='GL-UNIQUE-B', initially="DEFERRED", deferrable=True),
-
+        UniqueConstraint(
+            "gh_login", name="GH-UNIQUE-C", initially="DEFERRED", deferrable=True
+        ),
+        UniqueConstraint(
+            "gl_id", name="GL-UNIQUE-B", initially="DEFERRED", deferrable=True
+        ),
         # unique key for gitlab users on insertion
-        UniqueConstraint('gl_username', name='GL-UNIQUE-C', initially="DEFERRED", deferrable=True),
-        UniqueConstraint('cntrb_login', name='GL-cntrb-LOGIN-UNIQUE'),
-
-
+        UniqueConstraint(
+            "gl_username", name="GL-UNIQUE-C", initially="DEFERRED", deferrable=True
+        ),
+        UniqueConstraint("cntrb_login", name="GL-cntrb-LOGIN-UNIQUE"),
         # changed from inline to not inline
-        Index("cnt-fullname", "cntrb_full_name", postgresql_using='hash'),
-        Index("cntrb-theemail", "cntrb_email", postgresql_using='hash'),
+        Index("cnt-fullname", "cntrb_full_name", postgresql_using="hash"),
+        Index("cntrb-theemail", "cntrb_email", postgresql_using="hash"),
         Index("contributors_idx_cntrb_email3", "cntrb_email"),
         Index("cntrb_canonica-idx11", "cntrb_canonical"),
         Index("cntrb_login_platform_index", "cntrb_login"),
-
-
         # added
-        Index("contributor_worker_email_finder", "cntrb_email", postgresql_using='brin'),
-        Index("contributor_worker_fullname_finder", "cntrb_full_name", postgresql_using='brin'),
-
+        Index(
+            "contributor_worker_email_finder", "cntrb_email", postgresql_using="brin"
+        ),
+        Index(
+            "contributor_worker_fullname_finder",
+            "cntrb_full_name",
+            postgresql_using="brin",
+        ),
         Index("login", "cntrb_login"),
         Index("login-contributor-idx", "cntrb_login"),
-
         {
             "schema": "augur_data",
             "comment": "For GitHub, this should be repeated from gh_login. for other systems, it should be that systems login. \nGithub now allows a user to change their login name, but their user id remains the same in this case. So, the natural key is the combination of id and login, but there should never be repeated logins. ",
@@ -260,52 +267,72 @@ class Contributor(Base):
         TIMESTAMP(precision=0), server_default=text("CURRENT_TIMESTAMP")
     )
 
-    issues_opened = relationship("Issue", primaryjoin="Issue.reporter_id == Contributor.cntrb_id", back_populates="reporter")
+    issues_opened = relationship(
+        "Issue",
+        primaryjoin="Issue.reporter_id == Contributor.cntrb_id",
+        back_populates="reporter",
+    )
     pull_requests = relationship("PullRequest", back_populates="cntrb")
     pull_request_reviews = relationship("PullRequestReview", back_populates="cntrb")
-    commits = relationship("Commit", primaryjoin="Commit.cmt_author_platform_username == Contributor.cntrb_login", back_populates="contributor")
+    commits = relationship(
+        "Commit",
+        primaryjoin="Commit.cmt_author_platform_username == Contributor.cntrb_login",
+        back_populates="contributor",
+    )
     alias = relationship("ContributorsAlias", back_populates="cntrb")
 
     @classmethod
     def from_github(cls, contributor, tool_source, tool_version, data_source):
         from augur.tasks.util.AugurUUID import GithubUUID
 
-        cntrb_id = GithubUUID()   
+        cntrb_id = GithubUUID()
         cntrb_id["user"] = contributor["id"]
-        
+
         contributor_obj = cls()
 
         contributor_obj.cntrb_id = cntrb_id.to_UUID()
-        contributor_obj.cntrb_login = contributor['login']
-        contributor_obj.cntrb_created_at = contributor['created_at'] if 'created_at' in contributor else None
+        contributor_obj.cntrb_login = contributor["login"]
+        contributor_obj.cntrb_created_at = (
+            contributor["created_at"] if "created_at" in contributor else None
+        )
         # Only set email if meaningful; avoid propagating empty/"null" strings
-        _email = contributor['email'] if 'email' in contributor else None
-        _email = None if _email in (None, '', 'null', 'Null') else _email
+        _email = contributor["email"] if "email" in contributor else None
+        _email = None if _email in (None, "", "null", "Null") else _email
         contributor_obj.cntrb_email = _email
-        contributor_obj.cntrb_company = contributor['company'] if 'company' in contributor else None
-        contributor_obj.cntrb_location = contributor['location'] if 'location' in contributor else None
+        contributor_obj.cntrb_company = (
+            contributor["company"] if "company" in contributor else None
+        )
+        contributor_obj.cntrb_location = (
+            contributor["location"] if "location" in contributor else None
+        )
         # cntrb_type =  dont have a use for this as of now ... let it default to null
         contributor_obj.cntrb_canonical = _email
-        contributor_obj.gh_user_id = contributor['id']
-        contributor_obj.gh_login = str(contributor['login'])  ## cast as string by SPG on 11/28/2021 due to `nan` user
-        contributor_obj.gh_url = contributor['url']
-        contributor_obj.gh_html_url = contributor['html_url']
-        contributor_obj.gh_node_id = contributor['node_id']
-        contributor_obj.gh_avatar_url = contributor['avatar_url']
-        contributor_obj.gh_gravatar_id = contributor['gravatar_id']
-        contributor_obj.gh_followers_url = contributor['followers_url']
-        contributor_obj.gh_following_url = contributor['following_url']
-        contributor_obj.gh_gists_url = contributor['gists_url']
-        contributor_obj.gh_starred_url = contributor['starred_url']
-        contributor_obj.gh_subscriptions_url = contributor['subscriptions_url']
-        contributor_obj.gh_organizations_url = contributor['organizations_url']
-        contributor_obj.gh_repos_url = contributor['repos_url']
-        contributor_obj.gh_events_url = contributor['events_url']
-        contributor_obj.gh_received_events_url = contributor['received_events_url']
-        contributor_obj.gh_type = contributor['type']
-        contributor_obj.gh_site_admin = contributor['site_admin']
-        contributor_obj.cntrb_last_used = None if 'updated_at' not in contributor else contributor['updated_at']
-        contributor_obj.cntrb_full_name = None if 'name' not in contributor else contributor['name']
+        contributor_obj.gh_user_id = contributor["id"]
+        contributor_obj.gh_login = str(
+            contributor["login"]
+        )  ## cast as string by SPG on 11/28/2021 due to `nan` user
+        contributor_obj.gh_url = contributor["url"]
+        contributor_obj.gh_html_url = contributor["html_url"]
+        contributor_obj.gh_node_id = contributor["node_id"]
+        contributor_obj.gh_avatar_url = contributor["avatar_url"]
+        contributor_obj.gh_gravatar_id = contributor["gravatar_id"]
+        contributor_obj.gh_followers_url = contributor["followers_url"]
+        contributor_obj.gh_following_url = contributor["following_url"]
+        contributor_obj.gh_gists_url = contributor["gists_url"]
+        contributor_obj.gh_starred_url = contributor["starred_url"]
+        contributor_obj.gh_subscriptions_url = contributor["subscriptions_url"]
+        contributor_obj.gh_organizations_url = contributor["organizations_url"]
+        contributor_obj.gh_repos_url = contributor["repos_url"]
+        contributor_obj.gh_events_url = contributor["events_url"]
+        contributor_obj.gh_received_events_url = contributor["received_events_url"]
+        contributor_obj.gh_type = contributor["type"]
+        contributor_obj.gh_site_admin = contributor["site_admin"]
+        contributor_obj.cntrb_last_used = (
+            None if "updated_at" not in contributor else contributor["updated_at"]
+        )
+        contributor_obj.cntrb_full_name = (
+            None if "name" not in contributor else contributor["name"]
+        )
         contributor_obj.tool_source = tool_source
         contributor_obj.tool_version = tool_version
         contributor_obj.data_source = data_source
@@ -520,10 +547,7 @@ class LstmAnomalyModel(Base):
 
 class Platform(Base):
     __tablename__ = "platform"
-    __table_args__ = (
-        Index("plat", "pltfrm_id", unique=True),
-        {"schema": "augur_data"}
-    )
+    __table_args__ = (Index("plat", "pltfrm_id", unique=True), {"schema": "augur_data"})
 
     pltfrm_id = Column(
         BigInteger,
@@ -544,8 +568,10 @@ class RepoGroup(Base):
     __table_args__ = (
         Index("rgidm", "repo_group_id", unique=True),
         Index("rgnameindex", "rg_name"),
-        {"schema": "augur_data",
-        "comment": "rg_type is intended to be either a GitHub Organization or a User Created Repo Group. "},
+        {
+            "schema": "augur_data",
+            "comment": "rg_type is intended to be either a GitHub Organization or a User Created Repo Group. ",
+        },
     )
 
     repo_group_id = Column(
@@ -581,26 +607,26 @@ class RepoGroup(Base):
             True if it exists, False if it does not
         """
 
-        query = session.query(RepoGroup).filter(RepoGroup.repo_group_id == repo_group_id)
+        query = session.query(RepoGroup).filter(
+            RepoGroup.repo_group_id == repo_group_id
+        )
 
         try:
-            result = execute_session_query(query, 'one')
+            result = execute_session_query(query, "one")
         except (NoResultFound, MultipleResultsFound):
             return False
 
         return True
-    
+
     @staticmethod
     def get_by_name(session, rg_name):
-
         with get_session() as session:
-
             try:
                 query = session.query(RepoGroup).filter(RepoGroup.rg_name == rg_name)
-                result = execute_session_query(query, 'one')
+                result = execute_session_query(query, "one")
             except NoResultFound:
                 return None
-        
+
         return result
 
 
@@ -815,17 +841,13 @@ class Repo(Base):
     __tablename__ = "repo"
     __table_args__ = (
         UniqueConstraint("repo_git", name="repo_git-unique"),
-
         Index("forked", "forked_from"),
         Index("repo_idx_repo_id_repo_namex", "repo_id", "repo_name"),
         Index("repogitindexrep", "repo_git"),
-
-        Index("reponameindex", "repo_name", postgresql_using='hash'),
-
+        Index("reponameindex", "repo_name", postgresql_using="hash"),
         Index("reponameindexbtree", "repo_name"),
         Index("rggrouponrepoindex", "repo_group_id"),
         Index("therepo", "repo_id", unique=True),
-
         {
             "schema": "augur_data",
             "comment": "This table is a combination of the columns in Facade’s repo table and GHTorrent’s projects table. ",
@@ -842,16 +864,16 @@ class Repo(Base):
     )
     repo_git = Column(String, nullable=False)
 
-    #TODO: repo_path and repo_name should be generated columns in postgresql
+    # TODO: repo_path and repo_name should be generated columns in postgresql
     repo_path = Column(String)
     repo_name = Column(String)
     repo_added = Column(
         TIMESTAMP(precision=0), nullable=False, server_default=text("CURRENT_TIMESTAMP")
     )
-    
-    #repo_status = Column(
+
+    # repo_status = Column(
     #    String, nullable=False, server_default=text("'New'::character varying")
-    #)
+    # )
     repo_type = Column(
         String,
         server_default=text("''::character varying"),
@@ -885,18 +907,14 @@ class Repo(Base):
 
     @staticmethod
     def get_by_id(session, repo_id):
-
         try:
             return session.query(Repo).filter(Repo.repo_id == repo_id).first()
         except Exception as e:
             session.rollback()
             raise e
 
-        
-
     @staticmethod
     def get_by_repo_git(session, repo_git):
-
         return session.query(Repo).filter(Repo.repo_git == repo_git).first()
 
     @staticmethod
@@ -918,7 +936,7 @@ class Repo(Base):
 
         owner, repo = Repo.parse_github_repo_url(url)
         if not owner or not repo:
-            return False, {"status":"Invalid repo url"}
+            return False, {"status": "Invalid repo url"}
 
         url = REPO_ENDPOINT.format(owner, repo)
 
@@ -928,36 +946,36 @@ class Repo(Base):
 
             # if result is None try again
             if not result:
-                attempts+=1
+                attempts += 1
                 continue
 
             data = result.json()
-            if result.status_code == 403: #GH Rate limiting
+            if result.status_code == 403:  # GH Rate limiting
                 wait_until = int(result.headers.get("x-ratelimit-reset"))
                 # use time package to find how many seconds to wait
                 wait_in_seconds = int(
-                    mktime(gmtime(wait_until)) -
-                    mktime(gmtime(time()))
+                    mktime(gmtime(wait_until)) - mktime(gmtime(time()))
                 )
                 wait_until_time = localtime(wait_until)
                 logger.error(f"rate limited fetching {url}")
-                logger.error(f"sleeping until {wait_until_time.tm_hour}:{wait_until_time.tm_min} ({wait_in_seconds} seconds)")
+                logger.error(
+                    f"sleeping until {wait_until_time.tm_hour}:{wait_until_time.tm_min} ({wait_in_seconds} seconds)"
+                )
                 sleep(wait_in_seconds)
-                attempts+=1
+                attempts += 1
                 continue
 
             # if there was an error return False
             if "message" in data.keys():
-
                 if data["message"] == "Not Found":
                     return False, {"status": "Invalid repo"}
 
                 return False, {"status": f"Github Error: {data['message']}"}
 
             return True, {"status": "Valid repo", "repo_type": data["owner"]["type"]}
-        
+
         return False, {"status": "Failed to validate repo after multiple attempts"}
-        
+
     @staticmethod
     def is_valid_gitlab_repo(gl_session, url: str) -> bool:
         """Determine whether a GitLab repo URL is valid.
@@ -978,7 +996,7 @@ class Repo(Base):
             return False, {"status": "Invalid repo URL"}
 
         # Encode namespace and project name for the API request
-        project_identifier = urllib.parse.quote(f"{owner}/{repo}", safe='')
+        project_identifier = urllib.parse.quote(f"{owner}/{repo}", safe="")
         url = REPO_ENDPOINT.format(project_identifier)
 
         attempts = 0
@@ -986,7 +1004,9 @@ class Repo(Base):
             response = hit_api(gl_session.oauths, url, logger)
 
             if wait_in_seconds := response.headers.get("Retry-After") is not None:
-                logger.info(f"rate limited fetching {url}, sleeping for {wait_in_seconds}")
+                logger.info(
+                    f"rate limited fetching {url}, sleeping for {wait_in_seconds}"
+                )
                 print(f"rate limited fetching {url}, sleeping for {wait_in_seconds}")
                 sleep(int(wait_in_seconds))
 
@@ -997,15 +1017,16 @@ class Repo(Base):
                 return True, {"status": "Valid repo"}
 
             attempts += 1
-            logger.info(f"could not validate {url}, will attempt again in {attempts*5} seconds")
-            sleep(attempts*3)
+            logger.info(
+                f"could not validate {url}, will attempt again in {attempts * 5} seconds"
+            )
+            sleep(attempts * 3)
 
         return False, {"status": "Failed to validate repo after multiple attempts"}
 
-
     @staticmethod
     def parse_github_repo_url(url: str) -> tuple:
-        """ Gets the owner and repo from a url.
+        """Gets the owner and repo from a url.
 
         Args:
             url: Github url
@@ -1013,8 +1034,11 @@ class Repo(Base):
         Returns:
             Tuple of owner and repo. Or a tuple of None and None if the url is invalid.
         """
-        
-        result = re.search(r"https?:\/\/github\.com\/([A-Za-z0-9 \- _]+)\/([A-Za-z0-9 \- _ \.]+)(.git)?\/?$", url)
+
+        result = re.search(
+            r"https?:\/\/github\.com\/([A-Za-z0-9 \- _]+)\/([A-Za-z0-9 \- _ \.]+)(.git)?\/?$",
+            url,
+        )
 
         if not result:
             return None, None
@@ -1025,10 +1049,10 @@ class Repo(Base):
         repo = capturing_groups[1]
 
         return owner, repo
-    
+
     @staticmethod
     def parse_gitlab_repo_url(url: str) -> tuple:
-        """ Gets the owner and repo from a gitlab url.
+        """Gets the owner and repo from a gitlab url.
 
         Args:
             url: Gitlab url
@@ -1036,14 +1060,16 @@ class Repo(Base):
         Returns:
             Tuple of owner and repo. Or a tuple of None and None if the url is invalid.
         """
-        
-        result = re.search(r"https?:\/\/gitlab\.com\/([A-Za-z0-9\-_\/]+)\/([A-Za-z0-9\-_]+)(\.git)?\/?$", url)
+
+        result = re.search(
+            r"https?:\/\/gitlab\.com\/([A-Za-z0-9\-_\/]+)\/([A-Za-z0-9\-_]+)(\.git)?\/?$",
+            url,
+        )
 
         if not result:
             return None, None
 
         capturing_groups = result.groups()
-
 
         owner = capturing_groups[0]
         repo = capturing_groups[1]
@@ -1052,7 +1078,7 @@ class Repo(Base):
 
     @staticmethod
     def parse_github_org_url(url):
-        """ Gets the owner from a org url.
+        """Gets the owner from a org url.
 
         Args:
             url: Github org url
@@ -1070,7 +1096,9 @@ class Repo(Base):
         return result.groups()[0]
 
     @staticmethod
-    def insert_gitlab_repo(session, url: str, repo_group_id: int, tool_source, repo_src_id = None):
+    def insert_gitlab_repo(
+        session, url: str, repo_group_id: int, tool_source, repo_src_id=None
+    ):
         """Add a repo to the repo table.
 
         Args:
@@ -1081,17 +1109,21 @@ class Repo(Base):
             If repo row exists then it will update the repo_group_id if param repo_group_id is not a default. If it does not exist is will simply insert the repo.
         """
 
-        if not isinstance(url, str) or not isinstance(repo_group_id, int) or not isinstance(tool_source, str):
+        if (
+            not isinstance(url, str)
+            or not isinstance(repo_group_id, int)
+            or not isinstance(tool_source, str)
+        ):
             return None
 
         if not RepoGroup.is_valid_repo_group_id(session, repo_group_id):
             return None
-        
+
         if url.endswith("/"):
             url = url[:-1]
-        
+
         url = url.lower()
-        
+
         owner, repo = Repo.parse_gitlab_repo_url(url)
         if not owner or not repo:
             return None
@@ -1105,12 +1137,14 @@ class Repo(Base):
             "tool_source": tool_source,
             "tool_version": "1.0",
             "data_source": "Git",
-            "repo_src_id": repo_src_id
+            "repo_src_id": repo_src_id,
         }
 
         repo_unique = ["repo_git"]
         return_columns = ["repo_id"]
-        result = session.insert_data(repo_data, Repo, repo_unique, return_columns, on_conflict_update=False)
+        result = session.insert_data(
+            repo_data, Repo, repo_unique, return_columns, on_conflict_update=False
+        )
 
         if not result:
             return None
@@ -1118,7 +1152,9 @@ class Repo(Base):
         return result[0]["repo_id"]
 
     @staticmethod
-    def insert_github_repo(session, url: str, repo_group_id: int, tool_source, repo_type, repo_src_id = None):
+    def insert_github_repo(
+        session, url: str, repo_group_id: int, tool_source, repo_type, repo_src_id=None
+    ):
         """Add a repo to the repo table.
 
         Args:
@@ -1130,17 +1166,22 @@ class Repo(Base):
             If repo row exists then it will update the repo_group_id if param repo_group_id is not a default. If it does not exist is will simply insert the repo.
         """
 
-        if not isinstance(url, str) or not isinstance(repo_group_id, int) or not isinstance(tool_source, str) or not isinstance(repo_type, str):
+        if (
+            not isinstance(url, str)
+            or not isinstance(repo_group_id, int)
+            or not isinstance(tool_source, str)
+            or not isinstance(repo_type, str)
+        ):
             return None
 
         if not RepoGroup.is_valid_repo_group_id(session, repo_group_id):
             return None
-        
+
         if url.endswith("/"):
             url = url[:-1]
-        
+
         url = url.lower()
-        
+
         owner, repo = Repo.parse_github_repo_url(url)
         if not owner or not repo:
             return None
@@ -1154,12 +1195,14 @@ class Repo(Base):
             "tool_source": tool_source,
             "tool_version": "1.0",
             "data_source": "Git",
-            "repo_src_id": repo_src_id
+            "repo_src_id": repo_src_id,
         }
 
         repo_unique = ["repo_git"]
         return_columns = ["repo_id"]
-        result = session.insert_data(repo_data, Repo, repo_unique, return_columns, on_conflict_update=False)
+        result = session.insert_data(
+            repo_data, Repo, repo_unique, return_columns, on_conflict_update=False
+        )
 
         if not result:
             return None
@@ -1167,8 +1210,6 @@ class Repo(Base):
         return result[0]["repo_id"]
 
 
-
-        
 class RepoTestCoverage(Base):
     __tablename__ = "repo_test_coverage"
     __table_args__ = {"schema": "augur_data"}
@@ -1274,9 +1315,11 @@ class Commit(Base):
             "cmt_author_date",
             "cmt_author_name",
         ),
-        Index("committer_affiliation", "cmt_committer_affiliation",
-                 postgresql_using='hash'),
-
+        Index(
+            "committer_affiliation",
+            "cmt_committer_affiliation",
+            postgresql_using="hash",
+        ),
         Index(
             "author_email,author_affiliation,author_date",
             "cmt_author_email",
@@ -1285,7 +1328,6 @@ class Commit(Base):
         ),
         Index("committer_raw_email", "cmt_committer_raw_email"),
         Index("repo_id,commit", "repo_id", "cmt_commit_hash"),
-
         {
             "schema": "augur_data",
             "comment": "Commits.\nEach row represents changes to one FILE within a single commit. So you will encounter multiple rows per commit hash in many cases. ",
@@ -1354,18 +1396,20 @@ class Commit(Base):
     contributor = relationship(
         "Contributor",
         primaryjoin="Commit.cmt_author_platform_username == Contributor.cntrb_login",
-        back_populates="commits"
+        back_populates="commits",
     )
     repo = relationship("Repo", back_populates="commits")
     message_ref = relationship("CommitCommentRef", back_populates="cmt")
 
+
 class CommitMessage(Base):
     __tablename__ = "commit_messages"
-    __table_args__ = ( UniqueConstraint("repo_id","cmt_hash", name="commit-message-insert-unique"),
-        { 
+    __table_args__ = (
+        UniqueConstraint("repo_id", "cmt_hash", name="commit-message-insert-unique"),
+        {
             "schema": "augur_data",
             "comment": "This table holds commit messages",
-        }
+        },
     )
 
     cmt_msg_id = Column(
@@ -1390,6 +1434,7 @@ class CommitMessage(Base):
         TIMESTAMP(precision=0), server_default=text("CURRENT_TIMESTAMP")
     )
 
+
 class Issue(Base):
     __tablename__ = "issues"
     __table_args__ = (
@@ -1397,7 +1442,6 @@ class Issue(Base):
         Index("issues_ibfk_1", "repo_id"),
         Index("issues_ibfk_2", "reporter_id"),
         Index("issues_ibfk_4", "pull_request_id"),
-
         UniqueConstraint("repo_id", "gh_issue_id"),
         UniqueConstraint("issue_url", name="issue-insert-unique"),
         {"schema": "augur_data"},
@@ -1447,10 +1491,13 @@ class Issue(Base):
     )
 
     cntrb = relationship(
-        "Contributor", primaryjoin="Issue.cntrb_id == Contributor.cntrb_id")
+        "Contributor", primaryjoin="Issue.cntrb_id == Contributor.cntrb_id"
+    )
     repo = relationship("Repo", back_populates="issues")
     reporter = relationship(
-        "Contributor", primaryjoin="Issue.reporter_id == Contributor.cntrb_id", back_populates="issues_opened"
+        "Contributor",
+        primaryjoin="Issue.reporter_id == Contributor.cntrb_id",
+        back_populates="issues_opened",
     )
     message_refs = relationship("IssueMessageRef", back_populates="issue")
     assignees = relationship("IssueAssignee", back_populates="issue")
@@ -1458,7 +1505,7 @@ class Issue(Base):
 
     # @classmethod
     # def from_github(cls):
-        
+
     #     issue_obj = cls()
 
     #     return issue_obj
@@ -1606,7 +1653,7 @@ class Message(Base):
 
     # @classmethod
     # def from_github(cls):
-        
+
     #     message_obj = cls()
 
     #     return message_obj
@@ -1785,50 +1832,56 @@ class PullRequest(Base):
 
     @classmethod
     def from_github(cls, pr, repo_id, tool_source, tool_version):
-
         pr_obj = cls()
 
         pr_obj.repo_id = repo_id
         pr_obj.pr_url = pr["url"]
-        pr_obj.pr_src_id = int(str(pr['id']).encode(encoding='UTF-8').decode(encoding='UTF-8')),
-        pr_obj.pr_src_node_id = pr['node_id'],
-        pr_obj.pr_html_url = pr['html_url'],
-        pr_obj.pr_diff_url = pr['diff_url'],
-        pr_obj.pr_patch_url = pr['patch_url'],
-        pr_obj.pr_issue_url = pr['issue_url'],
-        pr_obj.pr_augur_issue_id = None,
-        pr_obj.pr_src_number = pr['number'],
-        pr_obj.pr_src_state = pr['state'],
-        pr_obj.pr_src_locked = pr['locked'],
-        pr_obj.pr_src_title = str(pr['title']),
-        pr_obj.pr_augur_contributor_id = pr["cntrb_id"],
-        pr_obj.pr_body = str(pr['body']).encode(encoding='UTF-8', errors='backslashreplace').decode(encoding='UTF-8', errors='ignore') if (pr['body']) else None,
-        pr_obj.pr_created_at = pr['created_at'],
-        pr_obj.pr_updated_at = pr['updated_at'],
-        pr_obj.pr_closed_at = None if not (pr['closed_at']) else pr['closed_at'],
-        pr_obj.pr_merged_at = None if not (pr['merged_at']) else pr['merged_at'],
-        pr_obj.pr_merge_commit_sha = pr['merge_commit_sha'],
-        pr_obj.pr_teams = None,
-        pr_obj.pr_milestone = None,
-        pr_obj.pr_commits_url = pr['commits_url'],
-        pr_obj.pr_review_comments_url = pr['review_comments_url'],
-        pr_obj.pr_review_comment_url = pr['review_comment_url'],
-        pr_obj.pr_comments_url = pr['comments_url'],
-        pr_obj.pr_statuses_url = pr['statuses_url'],
-        pr_obj.pr_meta_head_id = None if not (pr['head']) else pr['head']['label'],
-        pr_obj.pr_meta_base_id = None if not (pr['base']) else pr['base']['label'],
-        pr_obj.pr_src_issue_url = pr['issue_url'],
-        pr_obj.pr_src_comments_url = pr['comments_url'],
-        pr_obj.pr_src_review_comments_url = pr['review_comments_url'],
-        pr_obj.pr_src_commits_url = pr['commits_url'],
-        pr_obj.pr_src_statuses_url = pr['statuses_url'],
-        pr_obj.pr_src_author_association = pr['author_association'],
-        pr_obj.tool_source = tool_source,
-        pr_obj.tool_version = tool_version,
-        pr_obj.data_source = 'GitHub API'
+        pr_obj.pr_src_id = (
+            int(str(pr["id"]).encode(encoding="UTF-8").decode(encoding="UTF-8")),
+        )
+        pr_obj.pr_src_node_id = (pr["node_id"],)
+        pr_obj.pr_html_url = (pr["html_url"],)
+        pr_obj.pr_diff_url = (pr["diff_url"],)
+        pr_obj.pr_patch_url = (pr["patch_url"],)
+        pr_obj.pr_issue_url = (pr["issue_url"],)
+        pr_obj.pr_augur_issue_id = (None,)
+        pr_obj.pr_src_number = (pr["number"],)
+        pr_obj.pr_src_state = (pr["state"],)
+        pr_obj.pr_src_locked = (pr["locked"],)
+        pr_obj.pr_src_title = (str(pr["title"]),)
+        pr_obj.pr_augur_contributor_id = (pr["cntrb_id"],)
+        pr_obj.pr_body = (
+            str(pr["body"])
+            .encode(encoding="UTF-8", errors="backslashreplace")
+            .decode(encoding="UTF-8", errors="ignore")
+            if (pr["body"])
+            else None,
+        )
+        pr_obj.pr_created_at = (pr["created_at"],)
+        pr_obj.pr_updated_at = (pr["updated_at"],)
+        pr_obj.pr_closed_at = (None if not (pr["closed_at"]) else pr["closed_at"],)
+        pr_obj.pr_merged_at = (None if not (pr["merged_at"]) else pr["merged_at"],)
+        pr_obj.pr_merge_commit_sha = (pr["merge_commit_sha"],)
+        pr_obj.pr_teams = (None,)
+        pr_obj.pr_milestone = (None,)
+        pr_obj.pr_commits_url = (pr["commits_url"],)
+        pr_obj.pr_review_comments_url = (pr["review_comments_url"],)
+        pr_obj.pr_review_comment_url = (pr["review_comment_url"],)
+        pr_obj.pr_comments_url = (pr["comments_url"],)
+        pr_obj.pr_statuses_url = (pr["statuses_url"],)
+        pr_obj.pr_meta_head_id = (None if not (pr["head"]) else pr["head"]["label"],)
+        pr_obj.pr_meta_base_id = (None if not (pr["base"]) else pr["base"]["label"],)
+        pr_obj.pr_src_issue_url = (pr["issue_url"],)
+        pr_obj.pr_src_comments_url = (pr["comments_url"],)
+        pr_obj.pr_src_review_comments_url = (pr["review_comments_url"],)
+        pr_obj.pr_src_commits_url = (pr["commits_url"],)
+        pr_obj.pr_src_statuses_url = (pr["statuses_url"],)
+        pr_obj.pr_src_author_association = (pr["author_association"],)
+        pr_obj.tool_source = (tool_source,)
+        pr_obj.tool_version = (tool_version,)
+        pr_obj.data_source = "GitHub API"
 
         return pr_obj
-
 
 
 class Release(Base):
@@ -1892,7 +1945,6 @@ class RepoBadging(Base):
 
     @staticmethod
     def insert(session, repo_id: int, data: dict) -> dict:
-
         insert_statement = text("""INSERT INTO repo_badging (repo_id,tool_source,tool_version,data_source,data)
         VALUES (:repo_id,:t_source,:t_version,:d_source,:data)
         """).bindparams(
@@ -1900,7 +1952,7 @@ class RepoBadging(Base):
             t_source="collect_linux_badge_info",
             t_version="0.50.3",
             d_source="OSSF CII",
-            data=json.dumps(data,indent=4)
+            data=json.dumps(data, indent=4),
         )
 
         session.execute_sql(insert_statement)
@@ -1932,9 +1984,14 @@ class RepoClusterMessage(Base):
 
 class RepoDependency(Base):
     __tablename__ = "repo_dependencies"
-    __table_args__ = ( UniqueConstraint("repo_id","dep_name","data_collection_date", name="deps-insert-unique"),
-        {"schema": "augur_data",
-        "comment": "Contains the dependencies for a repo.",},
+    __table_args__ = (
+        UniqueConstraint(
+            "repo_id", "dep_name", "data_collection_date", name="deps-insert-unique"
+        ),
+        {
+            "schema": "augur_data",
+            "comment": "Contains the dependencies for a repo.",
+        },
     )
 
     repo_dependencies_id = Column(
@@ -1962,8 +2019,11 @@ class RepoDependency(Base):
 
 class RepoDepsLibyear(Base):
     __tablename__ = "repo_deps_libyear"
-    __table_args__ = ( UniqueConstraint("repo_id","name", "data_collection_date", name="deps-libyear-insert-unique"),
-        {"schema": "augur_data"}
+    __table_args__ = (
+        UniqueConstraint(
+            "repo_id", "name", "data_collection_date", name="deps-libyear-insert-unique"
+        ),
+        {"schema": "augur_data"},
     )
 
     repo_deps_libyear_id = Column(
@@ -1995,8 +2055,9 @@ class RepoDepsLibyear(Base):
 
 class RepoDepsScorecard(Base):
     __tablename__ = "repo_deps_scorecard"
-    __table_args__ = ( UniqueConstraint("repo_id","name", name="deps-scorecard-insert-unique"),
-        {"schema": "augur_data"}
+    __table_args__ = (
+        UniqueConstraint("repo_id", "name", name="deps-scorecard-insert-unique"),
+        {"schema": "augur_data"},
     )
 
     repo_deps_scorecard_id = Column(
@@ -2008,7 +2069,7 @@ class RepoDepsScorecard(Base):
     )
     repo_id = Column(ForeignKey("augur_data.repo.repo_id"))
     name = Column(String)
-    #status = Column(String)
+    # status = Column(String)
     scorecard_check_details = Column(JSONB)
     score = Column(String)
     tool_source = Column(String)
@@ -2113,10 +2174,7 @@ class RepoInsight(Base):
 
 class RepoInsightsRecord(Base):
     __tablename__ = "repo_insights_records"
-    __table_args__ = (
-        Index("dater", "ri_date"),
-        {"schema": "augur_data"}
-    )
+    __table_args__ = (Index("dater", "ri_date"), {"schema": "augur_data"})
 
     ri_id = Column(
         BigInteger,
@@ -2343,7 +2401,7 @@ class CommitParent(Base):
     __table_args__ = (
         Index("commit_parents_ibfk_1", "cmt_id"),
         Index("commit_parents_ibfk_2", "parent_id"),
-        {"schema": "augur_data"}
+        {"schema": "augur_data"},
     )
 
     cmt_id = Column(
@@ -2402,8 +2460,10 @@ class IssueAssignee(Base):
     __tablename__ = "issue_assignees"
     __table_args__ = (
         Index("issue-cntrb-assign-idx-1", "cntrb_id"),
-        UniqueConstraint("issue_assignee_src_id", "issue_id", name="issue-assignee-insert-unique"),
-        {"schema": "augur_data"}
+        UniqueConstraint(
+            "issue_assignee_src_id", "issue_id", name="issue-assignee-insert-unique"
+        ),
+        {"schema": "augur_data"},
     )
 
     issue_assignee_id = Column(
@@ -2439,16 +2499,17 @@ class IssueAssignee(Base):
 
     @classmethod
     def from_github(cls, assignee, repo_id, tool_source, tool_version, data_source):
-        
         issue_assignee_obj = cls()
 
-        issue_assignee_obj.cntrb_id = assignee["cntrb_id"] # # this is added to the data by the function process_issue_contributors in issue_tasks.py
+        issue_assignee_obj.cntrb_id = assignee[
+            "cntrb_id"
+        ]  # # this is added to the data by the function process_issue_contributors in issue_tasks.py
         issue_assignee_obj.tool_source = tool_source
         issue_assignee_obj.tool_version = tool_version
         issue_assignee_obj.data_source = data_source
-        issue_assignee_obj.issue_assignee_src_id = int(assignee['id'])
-        issue_assignee_obj.issue_assignee_src_node = assignee['node_id']
-        issue_assignee_obj.repo_id = repo_id 
+        issue_assignee_obj.issue_assignee_src_id = int(assignee["id"])
+        issue_assignee_obj.issue_assignee_src_node = assignee["node_id"]
+        issue_assignee_obj.repo_id = repo_id
 
         return issue_assignee_obj
 
@@ -2456,12 +2517,10 @@ class IssueAssignee(Base):
 class IssueEvent(Base):
     __tablename__ = "issue_events"
     __table_args__ = (
-        UniqueConstraint('issue_id', 'issue_event_src_id', name='unique_event_id_key'),
-
+        UniqueConstraint("issue_id", "issue_event_src_id", name="unique_event_id_key"),
         Index("issue-cntrb-idx2", "issue_event_src_id"),
         Index("issue_events_ibfk_1", "issue_id"),
         Index("issue_events_ibfk_2", "cntrb_id"),
-
         {"schema": "augur_data"},
     )
 
@@ -2519,16 +2578,27 @@ class IssueEvent(Base):
     repo = relationship("Repo")
 
     @classmethod
-    def from_github(cls, event, issue_id, repo_id, platform_id, tool_source, tool_version, data_source):
+    def from_github(
+        cls,
+        event,
+        issue_id,
+        repo_id,
+        platform_id,
+        tool_source,
+        tool_version,
+        data_source,
+    ):
         issue_event_obj = cls()
-        issue_event_obj.issue_event_src_id = int(event['id'])
+        issue_event_obj.issue_event_src_id = int(event["id"])
         issue_event_obj.issue_id = issue_id
-        issue_event_obj.node_id = event['node_id']
-        issue_event_obj.node_url = event['url']
+        issue_event_obj.node_id = event["node_id"]
+        issue_event_obj.node_url = event["url"]
         issue_event_obj.cntrb_id = event["cntrb_id"] if "cntrb_id" in event else None
-        issue_event_obj.created_at = event['created_at'] if event.get('created_at') else None
-        issue_event_obj.action = event['event']
-        issue_event_obj.action_commit_hash = event.get('commit_id')
+        issue_event_obj.created_at = (
+            event["created_at"] if event.get("created_at") else None
+        )
+        issue_event_obj.action = event["event"]
+        issue_event_obj.action_commit_hash = event.get("commit_id")
         issue_event_obj.tool_source = tool_source
         issue_event_obj.tool_version = tool_version
         issue_event_obj.data_source = data_source
@@ -2578,18 +2648,19 @@ class IssueLabel(Base):
 
     @classmethod
     def from_github(cls, label, repo_id, tool_source, tool_version, data_source):
-
         issue_label_obj = cls()
 
-        issue_label_obj.label_text = label['name']
-        issue_label_obj.label_description = label['description'] if 'description' in label else None
-        issue_label_obj.label_color = label['color']
+        issue_label_obj.label_text = label["name"]
+        issue_label_obj.label_description = (
+            label["description"] if "description" in label else None
+        )
+        issue_label_obj.label_color = label["color"]
         issue_label_obj.tool_source = tool_source
         issue_label_obj.tool_version = tool_version
         issue_label_obj.data_source = data_source
-        issue_label_obj.label_src_id = int(label['id'])
-        issue_label_obj.label_src_node_id = label['node_id']
-        issue_label_obj.repo_id = repo_id 
+        issue_label_obj.label_src_id = int(label["id"])
+        issue_label_obj.label_src_node_id = label["node_id"]
+        issue_label_obj.repo_id = repo_id
 
         return issue_label_obj
 
@@ -2597,7 +2668,11 @@ class IssueLabel(Base):
 class IssueMessageRef(Base):
     __tablename__ = "issue_message_ref"
     __table_args__ = (
-        UniqueConstraint("issue_msg_ref_src_comment_id", "issue_id", name="issue-message-ref-insert-unique"),
+        UniqueConstraint(
+            "issue_msg_ref_src_comment_id",
+            "issue_id",
+            name="issue-message-ref-insert-unique",
+        ),
         {"schema": "augur_data"},
     )
 
@@ -2657,10 +2732,7 @@ class IssueMessageRef(Base):
 
 class LibraryDependency(Base):
     __tablename__ = "library_dependencies"
-    __table_args__ = (
-        Index("REPO_DEP", "library_id"),
-        {"schema": "augur_data"}
-    )
+    __table_args__ = (Index("REPO_DEP", "library_id"), {"schema": "augur_data"})
 
     lib_dependency_id = Column(
         BigInteger,
@@ -2794,7 +2866,6 @@ class MessageSentiment(Base):
 
 
 class PullRequestAnalysis(Base):
-
     pull_request_analysis_id = Column(
         BigInteger,
         primary_key=True,
@@ -2830,7 +2901,7 @@ class PullRequestAnalysis(Base):
     __table_args__ = (
         Index("pr_anal_idx", pull_request_id),
         Index("probability_idx", merge_probability.desc().nullslast()),
-        {"schema": "augur_data"}
+        {"schema": "augur_data"},
     )
 
     pull_request = relationship("PullRequest")
@@ -2840,8 +2911,10 @@ class PullRequestAssignee(Base):
     __tablename__ = "pull_request_assignees"
     __table_args__ = (
         Index("pr_meta_cntrb-idx", "contrib_id"),
-        UniqueConstraint("pull_request_id", "pr_assignee_src_id", name="assigniees-unique"),
-        {"schema": "augur_data"}
+        UniqueConstraint(
+            "pull_request_id", "pr_assignee_src_id", name="assigniees-unique"
+        ),
+        {"schema": "augur_data"},
     )
 
     pr_assignee_map_id = Column(
@@ -2885,7 +2958,7 @@ class PullRequestAssignee(Base):
         pr_assignee_obj = cls()
         # store the pr_url data on in the pr assignee data for now so we can relate it back to a pr later
         pr_assignee_obj.contrib_id = assignee["cntrb_id"]
-        pr_assignee_obj.pr_assignee_src_id = int(assignee['id'])
+        pr_assignee_obj.pr_assignee_src_id = int(assignee["id"])
         pr_assignee_obj.tool_source = tool_source
         pr_assignee_obj.tool_version = tool_version
         pr_assignee_obj.data_source = data_source
@@ -2981,9 +3054,7 @@ class PullRequestEvent(Base):
             initially="DEFERRED",
         )
     )
-    cntrb_id = Column(
-        ForeignKey("augur_data.contributors.cntrb_id")
-    )
+    cntrb_id = Column(ForeignKey("augur_data.contributors.cntrb_id"))
     action = Column(String, nullable=False)
     action_commit_hash = Column(String)
     created_at = Column(
@@ -3023,22 +3094,23 @@ class PullRequestEvent(Base):
     repo = relationship("Repo")
 
     @classmethod
-    def from_github(cls, event, pr_id, platform_id, repo_id, tool_source, tool_version, data_source):
-        
+    def from_github(
+        cls, event, pr_id, platform_id, repo_id, tool_source, tool_version, data_source
+    ):
         pr_event_obj = cls()
 
         pr_event_obj.pull_request_id = pr_id
         pr_event_obj.cntrb_id = event["cntrb_id"] if "cntrb_id" in event else None
-        pr_event_obj.action = event['event']
+        pr_event_obj.action = event["event"]
         pr_event_obj.action_commit_hash = None
-        pr_event_obj.created_at = event['created_at']
-        pr_event_obj.issue_event_src_id = int(event['issue']["id"])
-        pr_event_obj.node_id = event['node_id']
-        pr_event_obj.node_url = event['url']
+        pr_event_obj.created_at = event["created_at"]
+        pr_event_obj.issue_event_src_id = int(event["issue"]["id"])
+        pr_event_obj.node_id = event["node_id"]
+        pr_event_obj.node_url = event["url"]
         pr_event_obj.tool_source = tool_source
         pr_event_obj.tool_version = tool_version
         pr_event_obj.data_source = data_source
-        pr_event_obj.pr_platform_event_id = int(event['issue']["id"])
+        pr_event_obj.pr_platform_event_id = int(event["issue"]["id"])
         pr_event_obj.platform_id = platform_id
         pr_event_obj.repo_id = repo_id
 
@@ -3093,7 +3165,7 @@ class PullRequestFile(Base):
 
     # @classmethod
     # def from_github(cls):
-        
+
     #     pr_file_obj = cls()
 
     #     return pr_file_obj
@@ -3135,23 +3207,21 @@ class PullRequestLabel(Base):
     data_collection_date = Column(
         TIMESTAMP(precision=0), server_default=text("CURRENT_TIMESTAMP")
     )
-    
 
     pull_request = relationship("PullRequest", back_populates="labels")
     repo = relationship("Repo")
 
     @classmethod
     def from_github(cls, label, repo_id, tool_source, tool_version, data_source):
-
         pr_label_obj = cls()
 
         # store the pr_url data on in the pr label data for now so we can relate it back to a pr later
-        pr_label_obj.pr_src_id = int(label['id'])
-        pr_label_obj.pr_src_node_id = label['node_id']
-        pr_label_obj.pr_src_url = label['url']
-        pr_label_obj.pr_src_description = label['name']
-        pr_label_obj.pr_src_color = label['color']
-        pr_label_obj.pr_src_default_bool = label['default']
+        pr_label_obj.pr_src_id = int(label["id"])
+        pr_label_obj.pr_src_node_id = label["node_id"]
+        pr_label_obj.pr_src_url = label["url"]
+        pr_label_obj.pr_src_description = label["name"]
+        pr_label_obj.pr_src_color = label["color"]
+        pr_label_obj.pr_src_default_bool = label["default"]
         pr_label_obj.tool_source = tool_source
         pr_label_obj.tool_version = tool_version
         pr_label_obj.data_source = data_source
@@ -3163,7 +3233,11 @@ class PullRequestLabel(Base):
 class PullRequestMessageRef(Base):
     __tablename__ = "pull_request_message_ref"
     __table_args__ = (
-        UniqueConstraint("pr_message_ref_src_comment_id", "pull_request_id", name="pull-request-message-ref-insert-unique"),
+        UniqueConstraint(
+            "pr_message_ref_src_comment_id",
+            "pull_request_id",
+            name="pull-request-message-ref-insert-unique",
+        ),
         {"schema": "augur_data"},
     )
 
@@ -3214,9 +3288,16 @@ class PullRequestMeta(Base):
     __tablename__ = "pull_request_meta"
     __table_args__ = (
         Index("pr_meta-cntrbid-idx", "cntrb_id"),
-        UniqueConstraint("pull_request_id", "pr_head_or_base", 'pr_sha', name="pull-request-meta-insert-unique"),
-        {"schema": "augur_data",
-        "comment": 'Pull requests contain referencing metadata.  There are a few columns that are discrete. There are also head and base designations for the repo on each side of the pull request. Similar functions exist in GitLab, though the language here is based on GitHub. The JSON Being adapted to as of the development of this schema is here:      "base": {       "label": "chaoss:dev",       "ref": "dev",       "sha": "dc6c6f3947f7dc84ecba3d8bda641ef786e7027d",       "user": {         "login": "chaoss",         "id": 29740296,         "node_id": "MDEyOk9yZ2FuaXphdGlvbjI5NzQwMjk2",         "avatar_url": "https://avatars2.githubusercontent.com/u/29740296?v=4",         "gravatar_id": "",         "url": "https://api.github.com/users/chaoss",         "html_url": "https://github.com/chaoss",         "followers_url": "https://api.github.com/users/chaoss/followers",         "following_url": "https://api.github.com/users/chaoss/following{/other_user}",         "gists_url": "https://api.github.com/users/chaoss/gists{/gist_id}",         "starred_url": "https://api.github.com/users/chaoss/starred{/owner}{/repo}",         "subscriptions_url": "https://api.github.com/users/chaoss/subscriptions",         "organizations_url": "https://api.github.com/users/chaoss/orgs",         "repos_url": "https://api.github.com/users/chaoss/repos",         "events_url": "https://api.github.com/users/chaoss/events{/privacy}",         "received_events_url": "https://api.github.com/users/chaoss/received_events",         "type": "Organization",         "site_admin": false       },       "repo": {         "id": 78134122,         "node_id": "MDEwOlJlcG9zaXRvcnk3ODEzNDEyMg==",         "name": "augur",         "full_name": "chaoss/augur",         "private": false,         "owner": {           "login": "chaoss",           "id": 29740296,           "node_id": "MDEyOk9yZ2FuaXphdGlvbjI5NzQwMjk2",           "avatar_url": "https://avatars2.githubusercontent.com/u/29740296?v=4",           "gravatar_id": "",           "url": "https://api.github.com/users/chaoss",           "html_url": "https://github.com/chaoss",           "followers_url": "https://api.github.com/users/chaoss/followers",           "following_url": "https://api.github.com/users/chaoss/following{/other_user}",           "gists_url": "https://api.github.com/users/chaoss/gists{/gist_id}",           "starred_url": "https://api.github.com/users/chaoss/starred{/owner}{/repo}",           "subscriptions_url": "https://api.github.com/users/chaoss/subscriptions",           "organizations_url": "https://api.github.com/users/chaoss/orgs",           "repos_url": "https://api.github.com/users/chaoss/repos",           "events_url": "https://api.github.com/users/chaoss/events{/privacy}",           "received_events_url": "https://api.github.com/users/chaoss/received_events",           "type": "Organization",           "site_admin": false         }, '},
+        UniqueConstraint(
+            "pull_request_id",
+            "pr_head_or_base",
+            "pr_sha",
+            name="pull-request-meta-insert-unique",
+        ),
+        {
+            "schema": "augur_data",
+            "comment": 'Pull requests contain referencing metadata.  There are a few columns that are discrete. There are also head and base designations for the repo on each side of the pull request. Similar functions exist in GitLab, though the language here is based on GitHub. The JSON Being adapted to as of the development of this schema is here:      "base": {       "label": "chaoss:dev",       "ref": "dev",       "sha": "dc6c6f3947f7dc84ecba3d8bda641ef786e7027d",       "user": {         "login": "chaoss",         "id": 29740296,         "node_id": "MDEyOk9yZ2FuaXphdGlvbjI5NzQwMjk2",         "avatar_url": "https://avatars2.githubusercontent.com/u/29740296?v=4",         "gravatar_id": "",         "url": "https://api.github.com/users/chaoss",         "html_url": "https://github.com/chaoss",         "followers_url": "https://api.github.com/users/chaoss/followers",         "following_url": "https://api.github.com/users/chaoss/following{/other_user}",         "gists_url": "https://api.github.com/users/chaoss/gists{/gist_id}",         "starred_url": "https://api.github.com/users/chaoss/starred{/owner}{/repo}",         "subscriptions_url": "https://api.github.com/users/chaoss/subscriptions",         "organizations_url": "https://api.github.com/users/chaoss/orgs",         "repos_url": "https://api.github.com/users/chaoss/repos",         "events_url": "https://api.github.com/users/chaoss/events{/privacy}",         "received_events_url": "https://api.github.com/users/chaoss/received_events",         "type": "Organization",         "site_admin": false       },       "repo": {         "id": 78134122,         "node_id": "MDEwOlJlcG9zaXRvcnk3ODEzNDEyMg==",         "name": "augur",         "full_name": "chaoss/augur",         "private": false,         "owner": {           "login": "chaoss",           "id": 29740296,           "node_id": "MDEyOk9yZ2FuaXphdGlvbjI5NzQwMjk2",           "avatar_url": "https://avatars2.githubusercontent.com/u/29740296?v=4",           "gravatar_id": "",           "url": "https://api.github.com/users/chaoss",           "html_url": "https://github.com/chaoss",           "followers_url": "https://api.github.com/users/chaoss/followers",           "following_url": "https://api.github.com/users/chaoss/following{/other_user}",           "gists_url": "https://api.github.com/users/chaoss/gists{/gist_id}",           "starred_url": "https://api.github.com/users/chaoss/starred{/owner}{/repo}",           "subscriptions_url": "https://api.github.com/users/chaoss/subscriptions",           "organizations_url": "https://api.github.com/users/chaoss/orgs",           "repos_url": "https://api.github.com/users/chaoss/repos",           "events_url": "https://api.github.com/users/chaoss/events{/privacy}",           "received_events_url": "https://api.github.com/users/chaoss/received_events",           "type": "Organization",           "site_admin": false         }, ',
+        },
     )
 
     pr_repo_meta_id = Column(
@@ -3266,13 +3347,12 @@ class PullRequestMeta(Base):
 
     @classmethod
     def from_github(cls, meta, repo_id, tool_source, tool_version, data_source):
-        
         pr_meta_obj = cls()
 
-        pr_meta_obj.pr_head_or_base = meta['pr_head_or_base']
-        pr_meta_obj.pr_src_meta_label = meta['label']
-        pr_meta_obj.pr_src_meta_ref = meta['ref']
-        pr_meta_obj.pr_sha = meta['sha']
+        pr_meta_obj.pr_head_or_base = meta["pr_head_or_base"]
+        pr_meta_obj.pr_src_meta_label = meta["label"]
+        pr_meta_obj.pr_src_meta_ref = meta["ref"]
+        pr_meta_obj.pr_sha = meta["sha"]
         # Cast as int for the `nan` user by SPG on 11/28/2021; removed 12/6/2021
         pr_meta_obj.cntrb_id = meta["cntrb_id"] if "cntrb_id" in meta else None
         pr_meta_obj.tool_source = tool_source
@@ -3331,11 +3411,10 @@ class PullRequestReviewer(Base):
 
     @classmethod
     def from_github(cls, reviewer, repo_id, tool_source, tool_version, data_source):
-
         pr_reviewer_obj = cls()
 
         pr_reviewer_obj.cntrb_id = reviewer["cntrb_id"]
-        pr_reviewer_obj.pr_reviewer_src_id = int(float(reviewer['id']))
+        pr_reviewer_obj.pr_reviewer_src_id = int(float(reviewer["id"]))
         pr_reviewer_obj.tool_source = tool_source
         pr_reviewer_obj.tool_version = tool_version
         pr_reviewer_obj.data_source = data_source
@@ -3408,7 +3487,7 @@ class PullRequestReview(Base):
 
     # @classmethod
     # def from_github(cls):
-        
+
     #     pr_review_obj = cls()
 
     #     return pr_reivew_obj
@@ -3457,8 +3536,10 @@ class PullRequestRepo(Base):
     __tablename__ = "pull_request_repo"
     __table_args__ = (
         Index("pr-cntrb-idx-repo", "pr_cntrb_id"),
-        {"schema": "augur_data",
-        "comment": "This table is for storing information about forks that exist as part of a pull request. Generally we do not want to track these like ordinary repositories. "},
+        {
+            "schema": "augur_data",
+            "comment": "This table is for storing information about forks that exist as part of a pull request. Generally we do not want to track these like ordinary repositories. ",
+        },
     )
 
     pr_repo_id = Column(
@@ -3499,7 +3580,9 @@ class PullRequestRepo(Base):
 class PullRequestReviewMessageRef(Base):
     __tablename__ = "pull_request_review_message_ref"
     __table_args__ = (
-        UniqueConstraint("pr_review_msg_src_id", name="pull-request-review-message-ref-insert-unique"),
+        UniqueConstraint(
+            "pr_review_msg_src_id", name="pull-request-review-message-ref-insert-unique"
+        ),
         {"schema": "augur_data"},
     )
 
@@ -3578,9 +3661,7 @@ class RepoClone(Base):
     repo_clone_data_id = Column(
         BigInteger,
         primary_key=True,
-        server_default=text(
-            "nextval('augur_data.repo_clones_data_id_seq'::regclass)"
-        ),
+        server_default=text("nextval('augur_data.repo_clones_data_id_seq'::regclass)"),
     )
     repo_id = Column(
         ForeignKey(

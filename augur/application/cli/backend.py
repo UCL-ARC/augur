@@ -1,7 +1,8 @@
-#SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: MIT
 """
 Augur library commands for controlling the backend components
 """
+
 import resource
 import os
 import time
@@ -16,60 +17,102 @@ import requests
 from redis.exceptions import ConnectionError as RedisConnectionError
 from urllib.parse import urlparse
 
-from augur.tasks.start_tasks import augur_collection_monitor, create_collection_status_records
+from augur.tasks.start_tasks import (
+    augur_collection_monitor,
+    create_collection_status_records,
+)
 from augur.tasks.git.facade_tasks import clone_repos
 from augur.tasks.github.contributors import process_contributors
 from augur.tasks.github.util.github_api_key_handler import GithubApiKeyHandler
 from augur.tasks.gitlab.gitlab_api_key_handler import GitlabApiKeyHandler
-from augur.tasks.data_analysis.contributor_breadth_worker.contributor_breadth_worker import contributor_breadth_model
-from augur.tasks.init.redis_connection import get_redis_connection 
+from augur.tasks.data_analysis.contributor_breadth_worker.contributor_breadth_worker import (
+    contributor_breadth_model,
+)
+from augur.tasks.init.redis_connection import get_redis_connection
 from augur.application.db.models import UserRepo
 from augur.application.db.session import DatabaseSession
 from augur.application.logs import AugurLogger
 from augur.application.db.lib import get_value
-from augur.application.cli import test_connection, test_db_connection, with_database, DatabaseContext
+from augur.application.cli import (
+    test_connection,
+    test_db_connection,
+    with_database,
+    DatabaseContext,
+)
 import sqlalchemy as s
 
 from keyman.KeyClient import KeyClient, KeyPublisher
 
-reset_logs = os.getenv("AUGUR_RESET_LOGS", 'True').lower() in ('true', '1', 't', 'y', 'yes')
+
+reset_logs = os.getenv("AUGUR_RESET_LOGS", "True").lower() in (
+    "true",
+    "1",
+    "t",
+    "y",
+    "yes",
+)
 
 logger = AugurLogger("augur", reset_logfiles=reset_logs).get_logger()
 
 
-@click.group('server', short_help='Commands for controlling the backend API server & data collection workers')
+@click.group(
+    "server",
+    short_help="Commands for controlling the backend API server & data collection workers",
+)
 @click.pass_context
 def cli(ctx):
     ctx.obj = DatabaseContext()
 
+
 @cli.command("start")
-@click.option("--disable-collection", is_flag=True, default=False, help="Turns off data collection workers")
-@click.option("--development", is_flag=True, default=False, help="Enable development mode, implies --disable-collection")
-@click.option("--pidfile", default="main.pid", help="File to store the controlling process ID in")
-@click.option('--port')
+@click.option(
+    "--disable-collection",
+    is_flag=True,
+    default=False,
+    help="Turns off data collection workers",
+)
+@click.option(
+    "--development",
+    is_flag=True,
+    default=False,
+    help="Enable development mode, implies --disable-collection",
+)
+@click.option(
+    "--pidfile", default="main.pid", help="File to store the controlling process ID in"
+)
+@click.option("--port")
 @test_connection
 @test_db_connection
 @with_database
 @click.pass_context
 def start(ctx, disable_collection, development, pidfile, port):
+    # import debugpy
+    # import inspect
+    # from augur.application.cli.debugger import (
+    #     initialize_flask_server_debugger_if_needed,
+    # )
+
+    # initialize_flask_server_debugger_if_needed(inspect.currentframe().f_code.co_name)
+    # logger.info("Waiting for client to attach...")
+    # # debugpy.wait_for_client()
+    # logger.info("Still Waiting for client to attach...")
+    # debugpy.breakpoint()
     """Start Augur's backend server."""
     with open(pidfile, "w") as pidfile_io:
         pidfile_io.write(str(os.getpid()))
-        
     try:
-        if os.environ.get('AUGUR_DOCKER_DEPLOY') != "1":
+        if os.environ.get("AUGUR_DOCKER_DEPLOY") != "1":
             raise_open_file_limit(100000)
-    except Exception as e: 
-        logger.error(
-                    ''.join(traceback.format_exception(None, e, e.__traceback__)))
-        
+    except Exception as e:
+        logger.error("".join(traceback.format_exception(None, e, e.__traceback__)))
+
         logger.error("Failed to raise open file limit!")
         raise e
-    
+
     if development:
         os.environ["AUGUR_DEV"] = "1"
         logger.info("Starting in development mode")
-    
+
     os.environ["AUGUR_PIDFILE"] = pidfile
 
     try:
@@ -81,13 +124,13 @@ def start(ctx, disable_collection, development, pidfile, port):
 
     if not port:
         port = get_value("Server", "port")
-    
+
     os.environ["AUGUR_PORT"] = str(port)
-    
+
     if disable_collection:
         os.environ["AUGUR_DISABLE_COLLECTION"] = "1"
-    
-    worker_vmem_cap = get_value("Celery", 'worker_process_vmem_cap')
+
+    worker_vmem_cap = get_value("Celery", "worker_process_vmem_cap")
 
     # create rabbit messages so if it failed on shutdown the queues are clean
     cleanup_collection_status_and_rabbit(logger, ctx.obj.engine)
@@ -106,7 +149,7 @@ def start(ctx, disable_collection, development, pidfile, port):
         except requests.exceptions.ConnectionError as e:
             time.sleep(0.5)
             continue
-        
+
         if not api_response.ok:
             logger.critical("Gunicorn failed to start or was not reachable. Exiting")
             exit(247)
@@ -114,33 +157,39 @@ def start(ctx, disable_collection, development, pidfile, port):
     else:
         logger.critical("Gunicorn was shut down abnormally. Exiting")
         exit(247)
-    
-    logger.info('Gunicorn webserver started...')
-    logger.info(f'Augur is running at: {"http" if development else "https"}://{host}:{port}')
+
+    logger.info("Gunicorn webserver started...")
+    logger.info(
+        f"Augur is running at: {'http' if development else 'https'}://{host}:{port}"
+    )
     logger.info(f"The API is available at '{api_response.json()['route']}'")
 
-    processes = start_celery_worker_processes(float(worker_vmem_cap), disable_collection)
+    processes = start_celery_worker_processes(
+        float(worker_vmem_cap), disable_collection
+    )
 
-    celery_beat_schedule_db = os.getenv("CELERYBEAT_SCHEDULE_DB", "celerybeat-schedule.db")
+    celery_beat_schedule_db = os.getenv(
+        "CELERYBEAT_SCHEDULE_DB", "celerybeat-schedule.db"
+    )
     if os.path.exists(celery_beat_schedule_db):
-            logger.info("Deleting old task schedule")
-            os.remove(celery_beat_schedule_db)
+        logger.info("Deleting old task schedule")
+        os.remove(celery_beat_schedule_db)
 
     log_level = get_value("Logging", "log_level")
     celery_beat_process = None
     celery_command = f"celery -A augur.tasks.init.celery_app.celery_app beat -l {log_level.lower()} -s {celery_beat_schedule_db}"
-    celery_beat_process = subprocess.Popen(celery_command.split(" "))    
+    celery_beat_process = subprocess.Popen(celery_command.split(" "))
     keypub = KeyPublisher()
-    
+
     if not disable_collection:
-        if os.environ.get('AUGUR_DOCKER_DEPLOY') != "1":
+        if os.environ.get("AUGUR_DOCKER_DEPLOY") != "1":
             orchestrator = subprocess.Popen("python keyman/Orchestrator.py".split())
 
         # Wait for orchestrator startup
         if not keypub.wait(republish=True):
             logger.critical("Key orchestrator did not respond in time")
             return
-        
+
         # load keys
         ghkeyman = GithubApiKeyHandler(logger)
         glkeyman = GitlabApiKeyHandler(logger)
@@ -152,16 +201,15 @@ def start(ctx, disable_collection, development, pidfile, port):
 
         for key in glkeyman.keys:
             keypub.publish(key, "gitlab_rest")
-        
-        with DatabaseSession(logger, engine=ctx.obj.engine) as session:
 
+        with DatabaseSession(logger, engine=ctx.obj.engine) as session:
             clean_collection_status(session)
             assign_orphan_repos_to_default_user(session)
-        
+
         create_collection_status_records.si().apply_async()
         time.sleep(3)
 
-        #put contributor breadth back in. Not sure why it was commented out
+        # put contributor breadth back in. Not sure why it was commented out
         contributor_breadth_model.si().apply_async()
 
         # start cloning repos when augur starts
@@ -170,14 +218,13 @@ def start(ctx, disable_collection, development, pidfile, port):
         process_contributors.si().apply_async()
 
         augur_collection_monitor.si().apply_async()
-        
+
     else:
         logger.info("Collection disabled")
-    
+
     try:
         server.wait()
     except KeyboardInterrupt:
-        
         if server:
             logger.info("Shutting down server")
             server.terminate()
@@ -192,64 +239,68 @@ def start(ctx, disable_collection, development, pidfile, port):
             celery_beat_process.terminate()
 
         if not disable_collection:
-
             try:
                 keypub.shutdown()
                 cleanup_collection_status_and_rabbit(logger, ctx.obj.engine)
             except RedisConnectionError:
                 pass
-            
+
     os.unlink(pidfile)
 
-def start_celery_worker_processes(vmem_cap_ratio, disable_collection=False):
 
-    #Calculate process scaling based on how much memory is available on the system in bytes.
-    #Each celery process takes ~500MB or 500 * 1024^2 bytes
+def start_celery_worker_processes(vmem_cap_ratio, disable_collection=False):
+    # Calculate process scaling based on how much memory is available on the system in bytes.
+    # Each celery process takes ~500MB or 500 * 1024^2 bytes
 
     process_list = []
 
-    #Cap memory usage to 30% of total virtual memory
+    # Cap memory usage to 30% of total virtual memory
     available_memory_in_bytes = psutil.virtual_memory().total * vmem_cap_ratio
-    available_memory_in_megabytes = available_memory_in_bytes / (1024 ** 2)
+    available_memory_in_megabytes = available_memory_in_bytes / (1024**2)
     max_process_estimate = available_memory_in_megabytes // 500
     sleep_time = 0
 
-    #Get a subset of the maximum procesess available using a ratio, not exceeding a maximum value
-    def determine_worker_processes(ratio,maximum):
-        return max(min(round(max_process_estimate * ratio),maximum),1)
-    
+    # Get a subset of the maximum procesess available using a ratio, not exceeding a maximum value
+    def determine_worker_processes(ratio, maximum):
+        return max(min(round(max_process_estimate * ratio), maximum), 1)
+
     frontend_worker = f"celery -A augur.tasks.init.celery_app.celery_app worker -l info --concurrency=1 -n frontend:{uuid.uuid4().hex}@%h -Q frontend"
     max_process_estimate -= 1
     process_list.append(subprocess.Popen(frontend_worker.split(" ")))
     sleep_time += 6
 
     if not disable_collection:
-
-        #2 processes are always reserved as a baseline.
+        # 2 processes are always reserved as a baseline.
         scheduling_worker = f"celery -A augur.tasks.init.celery_app.celery_app worker -l info --concurrency=2 -n scheduling:{uuid.uuid4().hex}@%h -Q scheduling"
         max_process_estimate -= 2
         process_list.append(subprocess.Popen(scheduling_worker.split(" ")))
         sleep_time += 6
 
-        #60% of estimate, Maximum value of 45 : Reduced because it can be lower
-        core_num_processes = determine_worker_processes(.40, 90)
-        logger.info(f"Starting core worker processes with concurrency={core_num_processes}")
+        # 60% of estimate, Maximum value of 45 : Reduced because it can be lower
+        core_num_processes = determine_worker_processes(0.40, 90)
+        logger.info(
+            f"Starting core worker processes with concurrency={core_num_processes}"
+        )
         core_worker = f"celery -A augur.tasks.init.celery_app.celery_app worker -l info --concurrency={core_num_processes} -n core:{uuid.uuid4().hex}@%h"
         process_list.append(subprocess.Popen(core_worker.split(" ")))
         sleep_time += 6
 
-        #20% of estimate, Maximum value of 25
-        secondary_num_processes = determine_worker_processes(.39, 50)
-        logger.info(f"Starting secondary worker processes with concurrency={secondary_num_processes}")
+        # 20% of estimate, Maximum value of 25
+        secondary_num_processes = determine_worker_processes(0.39, 50)
+        logger.info(
+            f"Starting secondary worker processes with concurrency={secondary_num_processes}"
+        )
         secondary_worker = f"celery -A augur.tasks.init.celery_app.celery_app worker -l info --concurrency={secondary_num_processes} -n secondary:{uuid.uuid4().hex}@%h -Q secondary"
         process_list.append(subprocess.Popen(secondary_worker.split(" ")))
         sleep_time += 6
 
-        #15% of estimate, Maximum value of 20
-        facade_num_processes = determine_worker_processes(.17, 20)
-        logger.info(f"Starting facade worker processes with concurrency={facade_num_processes}")
+        # 15% of estimate, Maximum value of 20
+        facade_num_processes = determine_worker_processes(0.17, 20)
+        logger.info(
+            f"Starting facade worker processes with concurrency={facade_num_processes}"
+        )
         facade_worker = f"celery -A augur.tasks.init.celery_app.celery_app worker -l info --concurrency={facade_num_processes} -n facade:{uuid.uuid4().hex}@%h -Q facade"
-        
+
         process_list.append(subprocess.Popen(facade_worker.split(" ")))
         sleep_time += 6
 
@@ -258,7 +309,7 @@ def start_celery_worker_processes(vmem_cap_ratio, disable_collection=False):
     return process_list
 
 
-@cli.command('stop')
+@cli.command("stop")
 @test_connection
 @test_db_connection
 @with_database
@@ -271,7 +322,8 @@ def stop(ctx):
 
     augur_stop(signal.SIGTERM, logger, ctx.obj.engine)
 
-@cli.command('stop-collection-blocking')
+
+@cli.command("stop-collection-blocking")
 @test_connection
 @test_db_connection
 @with_database
@@ -281,22 +333,21 @@ def stop_collection(ctx):
     Stop collection tasks if they are running, block until complete
     """
     processes = get_augur_processes()
-    
+
     stopped = []
-    
+
     p: psutil.Process
     for p in processes:
         if p.name() == "celery":
             stopped.append(p)
             p.terminate()
-    
+
     if not len(stopped):
         logger.info("No collection processes found")
         return
-    
-    _, alive = psutil.wait_procs(stopped, 5,
-                                 lambda p: logger.info(f"STOPPED: {p.pid}"))
-    
+
+    _, alive = psutil.wait_procs(stopped, 5, lambda p: logger.info(f"STOPPED: {p.pid}"))
+
     killed = []
     while True:
         for i in range(len(alive)):
@@ -307,19 +358,20 @@ def stop_collection(ctx):
             elif not alive[i].is_running():
                 logger.info(f"STOPPED: {p.pid}")
                 killed.append(i)
-        
+
         for i in reversed(killed):
             alive.pop(i)
-        
+
         if not len(alive):
             break
-        
+
         logger.info(f"Waiting on [{', '.join(str(p.pid for p in alive))}]")
         time.sleep(0.5)
-    
+
     cleanup_collection_status_and_rabbit(logger, ctx.obj.engine)
 
-@cli.command('kill')
+
+@cli.command("kill")
 @test_connection
 @test_db_connection
 @with_database
@@ -334,7 +386,7 @@ def kill(ctx):
 
 def augur_stop(signal, logger, engine):
     """
-    Stops augur with the given signal, 
+    Stops augur with the given signal,
     and cleans up collection if it was running
     """
 
@@ -342,7 +394,9 @@ def augur_stop(signal, logger, engine):
     # if celery is running, run the cleanup function
     process_names = [process.name() for process in augur_processes]
 
-    _broadcast_signal_to_processes(augur_processes, broadcast_signal=signal, given_logger=logger)
+    _broadcast_signal_to_processes(
+        augur_processes, broadcast_signal=signal, given_logger=logger
+    )
 
     if "celery" in process_names:
         cleanup_collection_status_and_rabbit(logger, engine)
@@ -354,10 +408,10 @@ def cleanup_collection_status_and_rabbit(logger, engine):
     connection_string = get_value("RabbitMQ", "connection_string")
 
     with DatabaseSession(logger, engine=engine) as session:
-
         clean_collection_status(session)
 
     clear_rabbitmq_messages(connection_string)
+
 
 def clear_redis_caches():
     """Clears the redis databases that celery and redis use."""
@@ -369,33 +423,39 @@ def clear_redis_caches():
     redis_connection = get_redis_connection()
     redis_connection.flushdb()
 
+
 def clear_all_message_queues(connection_string):
-    queues = ['celery','secondary','scheduling','facade']
+    queues = ["celery", "secondary", "scheduling", "facade"]
 
     virtual_host_string = connection_string.split("/")[-1]
 
-    #Parse username and password with urllib
+    # Parse username and password with urllib
     parsed = urlparse(connection_string)
 
     for q in queues:
         curl_cmd = f"curl -i -u {parsed.username}:{parsed.password} -XDELETE http://localhost:15672/api/queues/{virtual_host_string}/{q}"
-        subprocess.call(curl_cmd.split(" "),stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        subprocess.call(
+            curl_cmd.split(" "), stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
 
 
 def clear_rabbitmq_messages(connection_string):
-    #virtual_host_string = connection_string.split("/")[-1]
+    # virtual_host_string = connection_string.split("/")[-1]
 
     logger.info("Clearing all messages from celery queue in rabbitmq")
     from augur.tasks.init.celery_app import celery_app
+
     celery_app.control.purge()
 
     clear_all_message_queues(connection_string)
-    #rabbitmq_purge_command = f"sudo rabbitmqctl purge_queue celery -p {virtual_host_string}"
-    #subprocess.call(rabbitmq_purge_command.split(" "))
+    # rabbitmq_purge_command = f"sudo rabbitmqctl purge_queue celery -p {virtual_host_string}"
+    # subprocess.call(rabbitmq_purge_command.split(" "))
 
-#Make sure that database reflects collection status when processes are killed/stopped.
+
+# Make sure that database reflects collection status when processes are killed/stopped.
 def clean_collection_status(session):
-    session.execute_sql(s.sql.text("""
+    session.execute_sql(
+        s.sql.text("""
         UPDATE augur_operations.collection_status 
         SET core_status='Pending',core_task_id = NULL
         WHERE core_status='Collecting' AND core_data_last_collected IS NULL;
@@ -423,8 +483,10 @@ def clean_collection_status(session):
         UPDATE augur_operations.collection_status
         SET facade_status='Pending', facade_task_id=NULL
         WHERE facade_status='Failed Clone' OR facade_status='Initializing';
-    """))
-    #TODO: write timestamp for currently running repos.
+    """)
+    )
+    # TODO: write timestamp for currently running repos.
+
 
 def assign_orphan_repos_to_default_user(session):
     query = s.sql.text("""
@@ -434,37 +496,39 @@ def assign_orphan_repos_to_default_user(session):
     repos = session.execute_sql(query).fetchall()
 
     for repo in repos:
-        UserRepo.insert(session, repo[0],1)
+        UserRepo.insert(session, repo[0], 1)
 
 
-@cli.command('export-env')
+@cli.command("export-env")
 def export_env(config):
     """
     Exports your GitHub key and database credentials
     """
 
-    export_file = open(os.getenv('AUGUR_EXPORT_FILE', 'augur_export_env.sh'), 'w+')
-    export_file.write('#!/bin/bash')
-    export_file.write('\n')
-    env_file = open(os.getenv('AUGUR_ENV_FILE', 'docker_env.txt'), 'w+')
+    export_file = open(os.getenv("AUGUR_EXPORT_FILE", "augur_export_env.sh"), "w+")
+    export_file.write("#!/bin/bash")
+    export_file.write("\n")
+    env_file = open(os.getenv("AUGUR_ENV_FILE", "docker_env.txt"), "w+")
 
     for env_var in config.get_env_config().items():
         if "LOG" not in env_var[0]:
             logger.info(f"Exporting {env_var[0]}")
-            export_file.write('export ' + env_var[0] + '="' + str(env_var[1]) + '"\n')
-            env_file.write(env_var[0] + '=' + str(env_var[1]) + '\n')
+            export_file.write("export " + env_var[0] + '="' + str(env_var[1]) + '"\n')
+            env_file.write(env_var[0] + "=" + str(env_var[1]) + "\n")
 
     export_file.close()
     env_file.close()
 
-@cli.command('repo-reset')
+
+@cli.command("repo-reset")
 @test_connection
 @test_db_connection
 def repo_reset(augur_app):
     """
     Refresh repo collection to force data collection
     """
-    augur_app.database.execute(s.sql.text("""
+    augur_app.database.execute(
+        s.sql.text("""
         UPDATE augur_operations.collection_status 
         SET core_status='Pending',core_task_id = NULL, core_data_last_collected = NULL;
 
@@ -475,31 +539,42 @@ def repo_reset(augur_app):
         SET facade_status='Pending', facade_task_id=NULL, facade_data_last_collected = NULL;
 
         TRUNCATE augur_data.commits CASCADE;
-        """))
+        """)
+    )
 
     logger.info("Repos successfully reset")
 
-@cli.command('processes')
+
+@cli.command("processes")
 def processes():
     """
     Outputs the name/PID of all Augur server & worker processes"""
     augur_processes = get_augur_processes()
     for process in augur_processes:
-        logger.info(f"Found process {process.pid} [{process.name()}] -> Parent: {process.parent().pid}")
+        logger.info(
+            f"Found process {process.pid} [{process.name()}] -> Parent: {process.parent().pid}"
+        )
+
 
 def get_augur_processes():
     augur_processes = []
-    for process in psutil.process_iter(['cmdline', 'name', 'environ']):
-        if process.info['cmdline'] is not None and process.info['environ'] is not None:
+    for process in psutil.process_iter(["cmdline", "name", "environ"]):
+        if process.info["cmdline"] is not None and process.info["environ"] is not None:
             try:
-                if os.getenv('VIRTUAL_ENV') in process.info['environ']['VIRTUAL_ENV'] and 'python' in ''.join(process.info['cmdline'][:]).lower():
+                if (
+                    os.getenv("VIRTUAL_ENV") in process.info["environ"]["VIRTUAL_ENV"]
+                    and "python" in "".join(process.info["cmdline"][:]).lower()
+                ):
                     if process.pid != os.getpid():
                         augur_processes.append(process)
             except (KeyError, FileNotFoundError):
                 pass
     return augur_processes
 
-def _broadcast_signal_to_processes(processes, broadcast_signal=signal.SIGTERM, given_logger=None):
+
+def _broadcast_signal_to_processes(
+    processes, broadcast_signal=signal.SIGTERM, given_logger=None
+):
     if given_logger is None:
         _logger = logger
     else:
@@ -515,7 +590,7 @@ def _broadcast_signal_to_processes(processes, broadcast_signal=signal.SIGTERM, g
 
 def raise_open_file_limit(num_files):
     """
-    sets number of open files soft limit 
+    sets number of open files soft limit
     """
     current_soft, current_hard = resource.getrlimit(resource.RLIMIT_NOFILE)
 
@@ -530,6 +605,7 @@ def raise_open_file_limit(num_files):
     resource.setrlimit(resource.RLIMIT_NOFILE, (num_files, current_hard))
 
     return
+
 
 # def initialize_components(augur_app, disable_housekeeper):
 #     master = None

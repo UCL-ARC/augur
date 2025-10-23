@@ -42,6 +42,18 @@ def cli(ctx):
 @with_database
 @click.pass_context
 def add_repos(ctx, filename):
+    # import debugpy
+    # import inspect
+    # from augur.application.cli.debugger import (
+    #     initialize_flask_server_debugger_if_needed,
+    # )
+
+    # initialize_flask_server_debugger_if_needed(inspect.currentframe().f_code.co_name)
+    # logger.info("Waiting for client to attach...")
+    # # debugpy.wait_for_client()
+    # logger.info("Still Waiting for client to attach...")
+    # debugpy.breakpoint()
+
     """Add repositories to Augur's database.
 
     The .csv file format should be repo_url,group_id
@@ -113,40 +125,54 @@ def add_repo_groups(ctx, filename):
     """
     Create new repo groups in Augur's database
     """
-    with ctx.obj.engine.begin() as connection:
-        df = pd.read_sql(
-            s.sql.text("SELECT repo_group_id FROM augur_data.repo_groups"),
-            connection,
-        )
-        repo_group_IDs = df["repo_group_id"].values.tolist()
+    # import debugpy
+    # import inspect
+    # from augur.application.cli.debugger import (
+    #     initialize_flask_server_debugger_if_needed,
+    # )
 
-        insert_repo_group_sql = s.sql.text(
+    # initialize_flask_server_debugger_if_needed(inspect.currentframe().f_code.co_name)
+    # logger.info("Waiting for client to attach...")
+    # # debugpy.wait_for_client()
+    # logger.info("Still Waiting for client to attach...")
+    # debugpy.breakpoint()
+    try:
+        with ctx.obj.engine.begin() as connection:
+            df = pd.read_sql(
+                s.sql.text("SELECT repo_group_id FROM augur_data.repo_groups"),
+                connection,
+            )
+            repo_group_IDs = df["repo_group_id"].values.tolist()
+
+            insert_repo_group_sql = s.sql.text(
+                """
+            INSERT INTO "augur_data"."repo_groups"("repo_group_id", "rg_name", "rg_description", "rg_website", "rg_recache", "rg_last_modified", "rg_type", "tool_source", "tool_version", "data_source", "data_collection_date") VALUES (:repo_group_id, :repo_group_name, '', '', 0, CURRENT_TIMESTAMP, 'Unknown', 'Loaded by user', '1.0', 'Git', CURRENT_TIMESTAMP);
             """
-        INSERT INTO "augur_data"."repo_groups"("repo_group_id", "rg_name", "rg_description", "rg_website", "rg_recache", "rg_last_modified", "rg_type", "tool_source", "tool_version", "data_source", "data_collection_date") VALUES (:repo_group_id, :repo_group_name, '', '', 0, CURRENT_TIMESTAMP, 'Unknown', 'Loaded by user', '1.0', 'Git', CURRENT_TIMESTAMP);
-        """
-        )
+            )
 
-        with open(filename) as create_repo_groups_file:
-            data = csv.reader(create_repo_groups_file, delimiter=",")
-            for row in data:
-                # Handle case where there's a hanging empty row.
-                if not row:
-                    logger.info("Skipping empty data...")
-                    continue
+            with open(filename) as create_repo_groups_file:
+                data = csv.reader(create_repo_groups_file, delimiter=",")
+                for row in data:
+                    # Handle case where there's a hanging empty row.
+                    if not row:
+                        logger.info("Skipping empty data...")
+                        continue
 
-                logger.info(f"Inserting repo group with values {row}...")
-                if int(row[0]) not in repo_group_IDs:
-                    repo_group_IDs.append(int(row[0]))
-                    connection.execute(
-                        insert_repo_group_sql.bindparams(
-                            repo_group_id=int(row[0]),
-                            repo_group_name=row[1],
+                    logger.info(f"Inserting repo group with values {row}...")
+                    if int(row[0]) not in repo_group_IDs:
+                        repo_group_IDs.append(int(row[0]))
+                        connection.execute(
+                            insert_repo_group_sql.bindparams(
+                                repo_group_id=int(row[0]),
+                                repo_group_name=row[1],
+                            )
                         )
-                    )
-                else:
-                    logger.info(
-                        f"Repo group with ID {row[1]} for repo group {row[1]} already exists, skipping..."
-                    )
+                    else:
+                        logger.info(
+                            f"Repo group with ID {row[1]} for repo group {row[1]} already exists, skipping..."
+                        )
+    except:
+        pass
 
 
 @cli.command("add-github-org")
@@ -220,6 +246,17 @@ def create_schema():
     """
     Create schema in the configured database
     """
+    # import debugpy
+    # import inspect
+    # from augur.application.cli.debugger import (
+    #     initialize_flask_server_debugger_if_needed,
+    # )
+
+    # initialize_flask_server_debugger_if_needed(inspect.currentframe().f_code.co_name)
+    # logger.info("Waiting for client to attach...")
+    # # debugpy.wait_for_client()
+    # logger.info("Still Waiting for client to attach...")
+    # debugpy.breakpoint()
     call(["alembic", "upgrade", "head"])
 
 

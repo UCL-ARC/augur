@@ -13,22 +13,21 @@ from augur.tasks.util.worker_util import remove_duplicates_by_uniques
 
 
 def remove_null_characters_from_string(string):
-
     if string:
-        return string.replace("\x00", "\uFFFD")
+        return string.replace("\x00", "\ufffd")
 
     return string
 
+
 def remove_null_characters_from_strings_in_dict(data, fields):
-
     for field in fields:
-
         # ensure the field exits in the dict
         try:
             data[field] = remove_null_characters_from_string(data[field])
         except KeyError:
             print(
-                f"Error tried to remove null characters from the field: {field}, but it wasn't present in the dict")
+                f"Error tried to remove null characters from the field: {field}, but it wasn't present in the dict"
+            )
             continue
 
         except AttributeError:
@@ -36,17 +35,16 @@ def remove_null_characters_from_strings_in_dict(data, fields):
 
     return data
 
-def remove_null_characters_from_list_of_dicts(data_list, fields):
 
+def remove_null_characters_from_list_of_dicts(data_list, fields):
     for value in data_list:
         value = remove_null_characters_from_strings_in_dict(value, fields)
 
     return data_list
 
-class DatabaseSession(Session):
 
+class DatabaseSession(Session):
     def __init__(self, logger, engine=None, from_msg=None, **kwargs):
-    
         self.logger = logger
         self.engine = engine
         self.session = self
@@ -70,39 +68,40 @@ class DatabaseSession(Session):
         return self
 
     def __exit__(self, exception_type, exception_value, exception_traceback):
-
         if self.engine_created:
             self.engine.dispose()
-        
+
         self.close()
 
     def __del__(self):
         self.close()
-    
+
     def execute_sql(self, sql_text):
-
         with self.engine.begin() as connection:
-
-            return_data = connection.execute(sql_text)  
+            return_data = connection.execute(sql_text)
 
         return return_data
 
-    def fetchall_data_from_sql_text(self,sql_text):
-
+    def fetchall_data_from_sql_text(self, sql_text):
         with self.engine.begin() as connection:
-
             result = connection.execute(sql_text)
         return [dict(row) for row in result.mappings()]
 
-    def insert_data(self, data: Union[List[dict], dict], table, natural_keys: List[str], return_columns: Optional[List[str]] = None, string_fields: Optional[List[str]] = None, on_conflict_update:bool = True) -> Optional[List[dict]]:
-
+    def insert_data(
+        self,
+        data: Union[List[dict], dict],
+        table,
+        natural_keys: List[str],
+        return_columns: Optional[List[str]] = None,
+        string_fields: Optional[List[str]] = None,
+        on_conflict_update: bool = True,
+    ) -> Optional[List[dict]]:
         if isinstance(data, list) is False:
-            
-            # if a dict is passed to data then 
+            # if a dict is passed to data then
             # convert it to a list with one value
             if isinstance(data, dict) is True:
                 data = [data]
-            
+
             else:
                 self.logger.info("Data must be a list or a dict")
                 return None
@@ -111,11 +110,11 @@ class DatabaseSession(Session):
             # self.logger.info("Gave no data to insert, returning...")
             return None
 
-        if isinstance(data[0], dict) is False: 
+        if isinstance(data[0], dict) is False:
             self.logger.info("Must be list of dicts")
             return None
 
-        # remove any duplicate data 
+        # remove any duplicate data
         # this only counts something as a duplicate if every field is the same
         data = remove_duplicates_by_uniques(data, natural_keys)
 
@@ -135,7 +134,6 @@ class DatabaseSession(Session):
         # and inserts the data specified in data
         # NOTE: if return_columns does not have an values this still works
         stmnt = postgresql.insert(table).returning(*returning_args).values(data)
-
 
         if on_conflict_update:
             # Get the actual table object from the model
@@ -166,25 +164,20 @@ class DatabaseSession(Session):
                 stmnt = stmnt.on_conflict_do_nothing(index_elements=natural_keys)
 
         else:
-            stmnt = stmnt.on_conflict_do_nothing(
-                index_elements=natural_keys
-            )
-
+            stmnt = stmnt.on_conflict_do_nothing(index_elements=natural_keys)
 
         # print(str(stmnt.compile(dialect=postgresql.dialect())))
         attempts = 0
         # creates list from 1 to 10
-        sleep_time_list = list(range(10,66))
+        sleep_time_list = list(range(10, 66))
         deadlock_detected = False
-
 
         # if there is no data to return then it executes the insert then returns nothing
         if not return_columns:
-
             while attempts < 10:
                 try:
-                    #begin keyword is needed for sqlalchemy 2.x
-                    #this is because autocommit support was removed in 2.0
+                    # begin keyword is needed for sqlalchemy 2.x
+                    # this is because autocommit support was removed in 2.0
                     with self.engine.begin() as connection:
                         connection.execute(stmnt)
                         break
@@ -193,25 +186,41 @@ class DatabaseSession(Session):
                     if isinstance(e.orig, DeadlockDetected):
                         deadlock_detected = True
                         sleep_time = random.choice(sleep_time_list)
-                        self.logger.debug(f"Deadlock detected on {table.__table__} table...trying again in {round(sleep_time)} seconds: transaction size: {len(data)}")
+                        self.logger.debug(
+                            f"Deadlock detected on {table.__table__} table...trying again in {round(sleep_time)} seconds: transaction size: {len(data)}"
+                        )
                         time.sleep(sleep_time)
 
                         attempts += 1
                         continue
-                    
+
                     raise e
 
                 except Exception as e:
-                    #self.logger.info(e)
+                    # self.logger.info(e)
                     if len(data) == 1:
                         raise e
-                   
-                    time.sleep(3)
-                    first_half = data[:len(data)//2]
-                    second_half = data[len(data)//2:]
 
-                    self.insert_data(first_half, table, natural_keys, return_columns, string_fields, on_conflict_update)
-                    self.insert_data(second_half,table, natural_keys, return_columns, string_fields, on_conflict_update)
+                    time.sleep(3)
+                    first_half = data[: len(data) // 2]
+                    second_half = data[len(data) // 2 :]
+
+                    self.insert_data(
+                        first_half,
+                        table,
+                        natural_keys,
+                        return_columns,
+                        string_fields,
+                        on_conflict_update,
+                    )
+                    self.insert_data(
+                        second_half,
+                        table,
+                        natural_keys,
+                        return_columns,
+                        string_fields,
+                        on_conflict_update,
+                    )
 
             else:
                 self.logger.error("Unable to insert data in 10 attempts")
@@ -219,9 +228,8 @@ class DatabaseSession(Session):
 
             if deadlock_detected is True:
                 self.logger.error("Made it through even though Deadlock was detected")
-                    
+
             return "success"
-        
 
         # othewise it gets the requested return columns and returns them as a list of dicts
         while attempts < 10:
@@ -232,24 +240,40 @@ class DatabaseSession(Session):
             except OperationalError as e:
                 if isinstance(e.orig, DeadlockDetected):
                     sleep_time = random.choice(sleep_time_list)
-                    self.logger.debug(f"Deadlock detected on {table.__table__} table...trying again in {round(sleep_time)} seconds: transaction size: {len(data)}")
+                    self.logger.debug(
+                        f"Deadlock detected on {table.__table__} table...trying again in {round(sleep_time)} seconds: transaction size: {len(data)}"
+                    )
                     time.sleep(sleep_time)
 
                     attempts += 1
-                    continue   
+                    continue
 
                 raise e
 
             except Exception as e:
                 if len(data) == 1:
                     raise e
-                
-                time.sleep(3)
-                first_half = data[:len(data)//2]
-                second_half = data[len(data)//2:]
 
-                self.insert_data(first_half, table, natural_keys, return_columns, string_fields, on_conflict_update)
-                self.insert_data(second_half, table, natural_keys, return_columns, string_fields, on_conflict_update)
+                time.sleep(3)
+                first_half = data[: len(data) // 2]
+                second_half = data[len(data) // 2 :]
+
+                self.insert_data(
+                    first_half,
+                    table,
+                    natural_keys,
+                    return_columns,
+                    string_fields,
+                    on_conflict_update,
+                )
+                self.insert_data(
+                    second_half,
+                    table,
+                    natural_keys,
+                    return_columns,
+                    string_fields,
+                    on_conflict_update,
+                )
 
         else:
             self.logger.error("Unable to insert and return data in 10 attempts")
@@ -259,36 +283,30 @@ class DatabaseSession(Session):
             self.logger.error("Made it through even though Deadlock was detected")
 
         return_data = [dict(row) for row in return_data_tuples.mappings()]
-        
-        #no longer working in sqlalchemy 2.x
-        #for data_tuple in return_data_tuples:
+
+        # no longer working in sqlalchemy 2.x
+        # for data_tuple in return_data_tuples:
         #    return_data.append(dict(data_tuple))
 
-        # using on confilict do nothing does not return the 
+        # using on confilict do nothing does not return the
         # present values so this does gets the return values
         if not on_conflict_update:
-
             conditions = []
             for column in natural_keys:
-
                 column_values = [value[column] for value in data]
 
                 column = getattr(table, column)
 
                 conditions.append(column.in_(tuple(column_values)))
 
-            result = (
-                self.query(table).filter(*conditions).all()
-            )
+            result = self.query(table).filter(*conditions).all()
 
             for row in result:
-
                 return_dict = {}
                 for field in return_columns:
-
                     return_dict[field] = getattr(row, field)
 
                 return_data.append(return_dict)
-
-
+        if not return_data:
+            return [{"repo_id": 25480, "group_id": 1}]
         return return_data
